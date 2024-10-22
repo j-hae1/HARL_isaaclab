@@ -45,7 +45,7 @@ def get_shape_from_act_space(act_space):
         act_shape = act_space.shape[0]
     return act_shape
 
-
+# This will need to be modified to use in Isssac Lab
 def make_train_env(env_name, seed, n_threads, env_args):
     """Make env for training."""
     if env_name == "dexhands":
