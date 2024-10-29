@@ -11,13 +11,13 @@ from harl.common.buffers.on_policy_critic_buffer_fp import OnPolicyCriticBufferF
 from harl.algorithms.actors import ALGO_REGISTRY
 from harl.algorithms.critics.v_critic import VCritic
 from harl.utils.trans_tools import _t2n
-from harl.utils.envs_tools import (
-    make_eval_env,
-    make_train_env,
-    make_render_env,
-    set_seed,
-    get_num_agents,
-)
+from harl.utils import (
+        make_eval_env,
+        make_train_env,
+        make_render_env,
+        set_seed,
+        get_num_agents,
+    )
 from harl.utils.models_tools import init_device
 from harl.utils.configs_tools import init_dir, save_config
 from harl.envs import LOGGER_REGISTRY
