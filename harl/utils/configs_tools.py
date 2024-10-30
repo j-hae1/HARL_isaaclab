@@ -128,6 +128,7 @@ def convert_json(obj):
 
 def save_config(args, algo_args, env_args, run_dir):
     """Save the configuration of the program."""
+    
     config = {"main_args": args, "algo_args": algo_args, "env_args": env_args}
     config_json = convert_json(config)
     output = json.dumps(config_json, separators=(",", ":\t"), indent=4, sort_keys=True)

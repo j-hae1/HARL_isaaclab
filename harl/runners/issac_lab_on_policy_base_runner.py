@@ -24,10 +24,10 @@ from harl.utils import (
 from harl.envs import LOGGER_REGISTRY
 
 
-class OnPolicyBaseRunner:
+class IssacLabOnPolicyBaseRunner:
     """Base runner for on-policy algorithms."""
 
-    def __init__(self, args, algo_args, env_args):
+    def __init__(self, args, env):
         """Initialize the OnPolicyBaseRunner class.
         Args:
             args: command-line arguments parsed by argparse. Three keys: algo, env, exp_name.
