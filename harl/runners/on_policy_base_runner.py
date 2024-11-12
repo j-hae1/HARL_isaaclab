@@ -11,16 +11,9 @@ from harl.common.buffers.on_policy_critic_buffer_fp import OnPolicyCriticBufferF
 from harl.algorithms.actors import ALGO_REGISTRY
 from harl.algorithms.critics.v_critic import VCritic
 from harl.utils.trans_tools import _t2n
-from harl.utils import (
-        make_eval_env,
-        make_train_env,
-        make_render_env,
-        set_seed,
-        get_num_agents,
-        init_device,
-        init_dir, 
-        save_config
-    )
+from harl.utils.envs_tools import set_seed, get_num_agents, make_render_env, make_eval_env, make_train_env 
+from harl.utils.configs_tools import init_dir, save_config, get_task_name
+from harl.utils.models_tools import init_device
 from harl.envs import LOGGER_REGISTRY
 
 
@@ -65,14 +58,14 @@ class OnPolicyBaseRunner:
         # set the config of env
         if self.algo_args["render"]["use_render"]:  # make envs for rendering
             (
-                self.envs,
+                self.env,
                 self.manual_render,
                 self.manual_expand_dims,
                 self.manual_delay,
                 self.env_num,
             ) = make_render_env(args["env"], algo_args["seed"]["seed"], env_args)
         else:  # make envs for training and evaluation
-            self.envs = make_train_env(
+            self.env = make_train_env(
                 args["env"],
                 algo_args["seed"]["seed"],
                 algo_args["train"]["n_rollout_threads"],
@@ -88,29 +81,29 @@ class OnPolicyBaseRunner:
                 if algo_args["eval"]["use_eval"]
                 else None
             )
-        self.num_agents = get_num_agents(args["env"], env_args, self.envs)
+        self.num_agents = get_num_agents(args["env"], env_args, self.env)
 
-        print("share_observation_space: ", self.envs.share_observation_space)
-        print("observation_space: ", self.envs.observation_space)
-        print("action_space: ", self.envs.action_space)
+        print("share_observation_space: ", self.env.share_observation_space)
+        print("observation_space: ", self.env.observation_space)
+        print("action_space: ", self.env.action_space)
 
         # actor
         if self.share_param:
             self.actor = []
             agent = ALGO_REGISTRY[args["algo"]](
                 {**algo_args["model"], **algo_args["algo"]},
-                self.envs.observation_space[0],
-                self.envs.action_space[0],
+                self.env.observation_space[0],
+                self.env.action_space[0],
                 device=self.device,
             )
             self.actor.append(agent)
             for agent_id in range(1, self.num_agents):
                 assert (
-                    self.envs.observation_space[agent_id]
-                    == self.envs.observation_space[0]
+                    self.env.observation_space[agent_id]
+                    == self.env.observation_space[0]
                 ), "Agents have heterogeneous observation spaces, parameter sharing is not valid."
                 assert (
-                    self.envs.action_space[agent_id] == self.envs.action_space[0]
+                    self.env.action_space[agent_id] == self.env.action_space[0]
                 ), "Agents have heterogeneous action spaces, parameter sharing is not valid."
                 self.actor.append(self.actor[0])
         else:
@@ -118,8 +111,8 @@ class OnPolicyBaseRunner:
             for agent_id in range(self.num_agents):
                 agent = ALGO_REGISTRY[args["algo"]](
                     {**algo_args["model"], **algo_args["algo"]},
-                    self.envs.observation_space[agent_id],
-                    self.envs.action_space[agent_id],
+                    self.env.observation_space[agent_id],
+                    self.env.action_space[agent_id],
                     device=self.device,
                 )
                 self.actor.append(agent)
@@ -129,12 +122,12 @@ class OnPolicyBaseRunner:
             for agent_id in range(self.num_agents):
                 ac_bu = OnPolicyActorBuffer(
                     {**algo_args["train"], **algo_args["model"]},
-                    self.envs.observation_space[agent_id],
-                    self.envs.action_space[agent_id],
+                    self.env.observation_space[agent_id],
+                    self.env.action_space[agent_id],
                 )
                 self.actor_buffer.append(ac_bu)
 
-            share_observation_space = self.envs.share_observation_space[0]
+            share_observation_space = self.env.share_observation_space[0]
             self.critic = VCritic(
                 {**algo_args["model"], **algo_args["algo"]},
                 share_observation_space,
@@ -218,7 +211,7 @@ class OnPolicyBaseRunner:
                     dones,
                     infos,
                     available_actions,
-                ) = self.envs.step(actions)
+                ) = self.env.step(actions)
                 # obs: (n_threads, n_agents, obs_dim)
                 # share_obs: (n_threads, n_agents, share_obs_dim)
                 # rewards: (n_threads, n_agents, 1)
@@ -270,7 +263,7 @@ class OnPolicyBaseRunner:
     def warmup(self):
         """Warm up the replay buffer."""
         # reset env
-        obs, share_obs, available_actions = self.envs.reset()
+        obs, share_obs, available_actions = self.env.reset()
         # replay buffer
         for agent_id in range(self.num_agents):
             self.actor_buffer[agent_id].obs[0] = obs[:, agent_id].copy()
@@ -598,7 +591,7 @@ class OnPolicyBaseRunner:
         if self.manual_expand_dims:
             # this env needs manual expansion of the num_of_parallel_envs dimension
             for _ in range(self.algo_args["render"]["render_episodes"]):
-                eval_obs, _, eval_available_actions = self.envs.reset()
+                eval_obs, _, eval_available_actions = self.env.reset()
                 eval_obs = np.expand_dims(np.array(eval_obs), axis=0)
                 eval_available_actions = (
                     np.expand_dims(np.array(eval_available_actions), axis=0)
@@ -640,7 +633,7 @@ class OnPolicyBaseRunner:
                         eval_dones,
                         _,
                         eval_available_actions,
-                    ) = self.envs.step(eval_actions[0])
+                    ) = self.env.step(eval_actions[0])
                     rewards += eval_rewards[0][0]
                     eval_obs = np.expand_dims(np.array(eval_obs), axis=0)
                     eval_available_actions = (
@@ -649,7 +642,7 @@ class OnPolicyBaseRunner:
                         else None
                     )
                     if self.manual_render:
-                        self.envs.render()
+                        self.env.render()
                     if self.manual_delay:
                         time.sleep(0.1)
                     if eval_dones[0]:
@@ -659,7 +652,7 @@ class OnPolicyBaseRunner:
             # this env does not need manual expansion of the num_of_parallel_envs dimension
             # such as dexhands, which instantiates a parallel env of 64 pair of hands
             for _ in range(self.algo_args["render"]["render_episodes"]):
-                eval_obs, _, eval_available_actions = self.envs.reset()
+                eval_obs, _, eval_available_actions = self.env.reset()
                 eval_rnn_states = np.zeros(
                     (
                         self.env_num,
@@ -695,10 +688,10 @@ class OnPolicyBaseRunner:
                         eval_dones,
                         _,
                         eval_available_actions,
-                    ) = self.envs.step(eval_actions)
+                    ) = self.env.step(eval_actions)
                     rewards += eval_rewards[0][0][0]
                     if self.manual_render:
-                        self.envs.render()
+                        self.env.render()
                     if self.manual_delay:
                         time.sleep(0.1)
                     if eval_dones[0][0]:
@@ -706,9 +699,9 @@ class OnPolicyBaseRunner:
                         break
         if "smac" in self.args["env"]:  # replay for smac, no rendering
             if "v2" in self.args["env"]:
-                self.envs.env.save_replay()
+                self.env.env.save_replay()
             else:
-                self.envs.save_replay()
+                self.env.save_replay()
 
     def prep_rollout(self):
         """Prepare for rollout."""
@@ -766,10 +759,10 @@ class OnPolicyBaseRunner:
     def close(self):
         """Close environment, writter, and logger."""
         if self.algo_args["render"]["use_render"]:
-            self.envs.close()
+            self.env.close()
         else:
-            self.envs.close()
-            if self.algo_args["eval"]["use_eval"] and self.eval_envs is not self.envs:
+            self.env.close()
+            if self.algo_args["eval"]["use_eval"] and self.eval_envs is not self.env:
                 self.eval_envs.close()
             self.writter.export_scalars_to_json(str(self.log_dir + "/summary.json"))
             self.writter.close()

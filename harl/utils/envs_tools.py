@@ -45,10 +45,14 @@ def get_shape_from_act_space(act_space):
         act_shape = act_space.shape[0]
     return act_shape
 
-# This will need to be modified to use in Isssac Lab
 def make_train_env(env_name, seed, n_threads, env_args):
     """Make env for training."""
-    if env_name == "dexhands":
+
+    if env_name == "isaaclab":
+        from harl.envs.isaaclab.Isaac_lab_env import IsaacLabEnv
+
+        return IsaacLabEnv({"n_threads": n_threads, **env_args})
+    elif env_name == "dexhands":
         from harl.envs.dexhands.dexhands_env import DexHandsEnv
 
         return DexHandsEnv({"n_threads": n_threads, **env_args})
@@ -109,7 +113,7 @@ def make_train_env(env_name, seed, n_threads, env_args):
 
 def make_eval_env(env_name, seed, n_threads, env_args):
     """Make env for evaluation."""
-    if env_name == "dexhands":  # dexhands does not support running multiple instances
+    if env_name == "dexhands" or env_name == "isaaclab":  # dexhands does not support running multiple instances
         raise NotImplementedError
 
     def get_env_fn(rank):
@@ -214,6 +218,16 @@ def make_render_env(env_name, seed, env_args):
         )
         manual_delay = False
         env_num = 64
+    elif env_name == "isaaclab":
+        from harl.envs.isaaclab.Isaac_lab_env import IsaacLabEnv
+
+        env = IsaacLabEnv({"n_threads": 64, **env_args})
+        manual_render = False  # dexhands renders automatically
+        manual_expand_dims = (
+            False  # dexhands uses parallel envs, thus dimension is already expanded
+        )
+        manual_delay = False
+        env_num = 64
     elif env_name == "lag":
         from harl.envs.lag.lag_env import LAGEnv
 
@@ -256,4 +270,6 @@ def get_num_agents(env, env_args, envs):
     elif env == "dexhands":
         return envs.n_agents
     elif env == "lag":
+        return envs.n_agents
+    elif env == "isaaclab":
         return envs.n_agents

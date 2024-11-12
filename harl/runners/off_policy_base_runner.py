@@ -7,17 +7,9 @@ import setproctitle
 from harl.common.valuenorm import ValueNorm
 from torch.distributions import Categorical
 from harl.utils.trans_tools import _t2n
-from harl.utils import (
-        make_eval_env,
-        make_train_env,
-        make_render_env,
-        set_seed,
-        get_num_agents,
-        init_device,
-        init_dir, 
-        save_config, 
-        get_task_name
-    )
+from harl.utils.envs_tools import set_seed, get_num_agents, make_render_env, make_eval_env, make_train_env 
+from harl.utils.configs_tools import init_dir, save_config, get_task_name
+from harl.utils.models_tools import init_device
 from harl.algorithms.actors import ALGO_REGISTRY
 from harl.algorithms.critics import CRITIC_REGISTRY
 from harl.common.buffers.off_policy_buffer_ep import OffPolicyBufferEP

@@ -3,9 +3,12 @@ Modified from OpenAI Baselines code to work with multi-agent envs
 """
 import numpy as np
 import torch
+import gym
 from multiprocessing import Process, Pipe
 from abc import ABC, abstractmethod
 import copy
+from typing import Any, Mapping, Sequence, Tuple, Union
+
 
 
 def tile_images(img_nhwc):
@@ -364,3 +367,191 @@ class ShareDummyVecEnv(ShareVecEnv):
                 env.render(mode=mode)
         else:
             raise NotImplementedError
+
+#isaac lab
+class IsaacLabWrapper(object):
+    def __init__(self, env: Any) -> None:
+        """Base wrapper class for multi-agent environments
+
+        :param env: The multi-agent environment to wrap
+        :type env: Any supported multi-agent environment
+        """
+        self._env = env
+        try:
+            self._unwrapped = self._env.unwrapped
+        except:
+            self._unwrapped = env
+
+        self._agent_map = {agent: i for i, agent in enumerate(self._unwrapped.agents)}
+        self._agent_map_inv = {i: agent for i, agent in enumerate(self._unwrapped.agents)}
+
+        # device
+        if hasattr(self._unwrapped, "device"):
+            self._device = torch.device(self._unwrapped.device)
+        else:
+            self._device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    def __getattr__(self, key: str) -> Any:
+        """Get an attribute from the wrapped environment
+
+        :param key: The attribute name
+        :type key: str
+
+        :raises AttributeError: If the attribute does not exist
+
+        :return: The attribute value
+        :rtype: Any
+        """
+        if hasattr(self._env, key):
+            return getattr(self._env, key)
+        if hasattr(self._unwrapped, key):
+            return getattr(self._unwrapped, key)
+        raise AttributeError(f"Wrapped environment ({self._unwrapped.__class__.__name__}) does not have attribute '{key}'")
+
+    def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
+        obs, _ = self._unwrapped.reset()
+
+        # turn obs into array with dims [batch, agent, *obs_shape]
+        obs = [o for o in obs.values()]
+        obs = torch.stack(obs, axis=1)
+
+        s_obs = [self._unwrapped.state() for _ in range(self._unwrapped.num_agents)]
+        s_obs = torch.stack(s_obs, axis=1)
+        
+        return obs, s_obs, None
+
+    def step(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
+        """Perform a step in the environment
+
+        :param actions: The actions to perform
+        :type actions: dictionary of torch.Tensor
+
+        :raises NotImplementedError: Not implemented
+
+        :return: Observation, reward, terminated, truncated, info
+        :rtype: tuple of dictionaries of torch.Tensor and any other info
+        """
+
+        actions = {self._agent_map_inv[i]:actions[i] for i in range(self._unwrapped.num_agents)}
+
+        obs, reward, terminated, truncated, info = self._unwrapped.step(actions)
+
+        obs = torch.stack([obs[agent] for agent in self._unwrapped.agents], axis=1)
+        s_obs = torch.stack([self._unwrapped.state() for _ in range(self._unwrapped.num_agents)], axis=1)
+        reward = torch.stack([reward[agent] for agent in self._unwrapped.agents], axis=1)
+        reward = reward.unsqueeze(-1)
+        terminated = torch.stack([terminated[agent] for agent in self._unwrapped.agents], axis=1)
+        # truncated = torch.stack([truncated[agent] for agent in self._unwrapped.agents], axis=1)
+
+        return obs, s_obs, reward, terminated, None, None
+
+    def state(self) -> torch.Tensor:
+        """Get the environment state
+
+        :raises NotImplementedError: Not implemented
+
+        :return: State
+        :rtype: torch.Tensor
+        """
+        raise NotImplementedError
+
+    def render(self, *args, **kwargs) -> Any:
+        """Render the environment
+
+        :raises NotImplementedError: Not implemented
+
+        :return: Any value from the wrapped environment
+        :rtype: any
+        """
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """Close the environment
+
+        :raises NotImplementedError: Not implemented
+        """
+        raise NotImplementedError
+
+    @property
+    def device(self) -> torch.device:
+        """The device used by the environment
+
+        If the wrapped environment does not have the ``device`` property, the value of this property
+        will be ``"cuda"`` or ``"cpu"`` depending on the device availability
+        """
+        return self._device
+
+    @property
+    def num_envs(self) -> int:
+        """Number of environments
+
+        If the wrapped environment does not have the ``num_envs`` property, it will be set to 1
+        """
+        return self._unwrapped.num_envs if hasattr(self._unwrapped, "num_envs") else 1
+
+    @property
+    def num_agents(self) -> int:
+        """Number of current agents
+
+        Read from the length of the ``agents`` property if the wrapped environment doesn't define it
+        """
+        try:
+            return self._unwrapped.num_agents
+        except:
+            return len(self.agents)
+
+    @property
+    def max_num_agents(self) -> int:
+        """Number of possible agents the environment could generate
+
+        Read from the length of the ``possible_agents`` property if the wrapped environment doesn't define it
+        """
+        try:
+            return self._unwrapped.max_num_agents
+        except:
+            return len(self.possible_agents)
+
+    @property
+    def agents(self) -> Sequence[str]:
+        """Names of all current agents
+
+        These may be changed as an environment progresses (i.e. agents can be added or removed)
+        """
+        return self._unwrapped.agents
+
+    @property
+    def possible_agents(self) -> Sequence[str]:
+        """Names of all possible agents the environment could generate
+
+        These can not be changed as an environment progresses
+        """
+        return self._unwrapped.possible_agents
+
+    # @property
+    # def state_spaces(self) -> Mapping[str, gym.Space]:
+    #     """State spaces
+
+    #     Since the state space is a global view of the environment (and therefore the same for all the agents),
+    #     this property returns a dictionary (for consistency with the other space-related properties) with the same
+    #     space for all the agents
+    #     """
+    #     space = self._unwrapped.state_space
+    #     return {agent: space for agent in self.possible_agents}
+
+    @property
+    def observation_space(self) -> Mapping[int, gym.Space]:
+        """Observation spaces
+        """
+        return {self._agent_map[k]: v for k, v in self._unwrapped.observation_spaces.items()}
+
+    @property
+    def action_space(self) -> Mapping[int, gym.Space]:
+        """Action spaces
+        """
+        return {self._agent_map[k]: v for k, v in self._unwrapped.action_spaces.items()}
+    
+    @property
+    def share_observation_space(self) -> Mapping[int, gym.Space]:
+        """Share observation space
+        """
+        return {self._agent_map[k]: self._unwrapped.state_space for k in self._unwrapped.agents}
