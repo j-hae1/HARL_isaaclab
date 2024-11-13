@@ -4,6 +4,7 @@ Modified from OpenAI Baselines code to work with multi-agent envs
 import numpy as np
 import torch
 import gym
+import gymnasium
 from multiprocessing import Process, Pipe
 from abc import ABC, abstractmethod
 import copy
@@ -409,7 +410,7 @@ class IsaacLabWrapper(object):
         raise AttributeError(f"Wrapped environment ({self._unwrapped.__class__.__name__}) does not have attribute '{key}'")
 
     def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
-        obs, _ = self._unwrapped.reset()
+        obs, _ = self._env.reset()
 
         # turn obs into array with dims [batch, agent, *obs_shape]
         obs = [o for o in obs.values()]
@@ -434,7 +435,7 @@ class IsaacLabWrapper(object):
 
         actions = {self._agent_map_inv[i]:actions[i] for i in range(self._unwrapped.num_agents)}
 
-        obs, reward, terminated, truncated, info = self._unwrapped.step(actions)
+        obs, reward, terminated, truncated, info = self._env.step(actions)
 
         obs = torch.stack([obs[agent] for agent in self._unwrapped.agents], axis=1)
         s_obs = torch.stack([self._unwrapped.state() for _ in range(self._unwrapped.num_agents)], axis=1)
@@ -555,3 +556,33 @@ class IsaacLabWrapper(object):
         """Share observation space
         """
         return {self._agent_map[k]: self._unwrapped.state_space for k in self._unwrapped.agents}
+    
+
+class IsaacVideoWrapper(gymnasium.wrappers.RecordVideo):
+
+    def step(self, action):
+        """Steps through the environment using action, recording observations if :attr:`self.recording`."""
+        (
+            observations,
+            rewards,
+            terminateds,
+            truncateds,
+            infos,
+        ) = self.env.step(action)
+
+        self.step_id += 1
+        self.episode_id += 1
+
+
+        if self.recording:
+            assert self.video_recorder is not None
+            self.video_recorder.capture_frame()
+            self.recorded_frames += 1
+            if self.video_length > 0:
+                if self.recorded_frames > self.video_length:
+                    self.close_video_recorder()
+
+        elif self._video_enabled():
+            self.start_video_recorder()
+
+        return observations, rewards, terminateds, truncateds, infos

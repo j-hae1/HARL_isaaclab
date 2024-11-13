@@ -1,6 +1,7 @@
 import torch
 import gymnasium as gym
-from harl.envs.env_wrappers import IsaacLabWrapper
+from harl.envs.env_wrappers import IsaacLabWrapper, IsaacVideoWrapper
+import os
 
 
 def _t2n(x):
@@ -10,9 +11,20 @@ def _t2n(x):
 class IsaacLabEnv:
     def __init__(self, env_args):
 
-        env = gym.make(env_args['task'], cfg=env_args['config'], render_mode="rgb_array")
-        self.env = IsaacLabWrapper(env)
+        self.env = gym.make(env_args['task'], cfg=env_args['config'], render_mode="rgb_array")
         
+        if env_args['video_settings']['video']:
+            video_kwargs = {
+                "video_folder": os.path.join(env_args['video_settings']['log_dir'], "train"),
+                "step_trigger": lambda step: step % env_args['video_settings']['video_interval'] == 0,
+                "video_length": env_args['video_settings']['video_length'],
+                "disable_logger": True,
+            }
+            self.env = IsaacVideoWrapper(self.env, **video_kwargs)
+
+        self.env = IsaacLabWrapper(self.env)
+        
+
         self.env_args = env_args
         self.n_envs = env_args["n_threads"]
         self.n_agents = self.env.num_agents
