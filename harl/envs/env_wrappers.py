@@ -369,7 +369,6 @@ class ShareDummyVecEnv(ShareVecEnv):
         else:
             raise NotImplementedError
 
-#isaac lab
 class IsaacLabWrapper(object):
     def __init__(self, env: Any) -> None:
         """Base wrapper class for multi-agent environments
