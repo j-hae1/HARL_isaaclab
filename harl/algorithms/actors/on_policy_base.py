@@ -32,6 +32,7 @@ class OnPolicyBase:
         self.obs_space = obs_space
         self.act_space = act_space
         # create actor network
+        # TODO needs a way to switch to neuron policy somehow, or maybe we don't need the activation function and can run the default instead
         self.actor = StochasticPolicy(args, self.obs_space, self.act_space, self.device)
         # create actor optimizer
         self.actor_optimizer = torch.optim.Adam(

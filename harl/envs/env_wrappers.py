@@ -298,6 +298,80 @@ class ShareSubprocVecEnv(ShareVecEnv):
             p.join()
         self.closed = True
 
+class NeuronWrapper(object):
+    """
+    This will transform a single agnet or multi agent enviroment into a neuron multi agent enviroment.
+    Where each agent in the unwapped enviroment is represented by many neuron agents.
+    The neuron agents will choose connections to observation, action output, and other neurons.
+    The neurons will be orginized in a ND grid and choose connections based on position in the grid.
+    Neurons will be able to move through the grid, change connections, and process observations as their actions.
+    Each agent will be trained individually using RL and will be unaware of the other agents state.
+    """
+
+    def __init__(self, env, neuron_factory, n_neurons_per_agent, space_dims):
+        self._env = env
+        self._unwrapped = env
+
+    def __getattr__(self, key):
+        if hasattr(self._env, key):
+            return getattr(self._env, key)
+        if hasattr(self._unwrapped, key):
+            return getattr(self._unwrapped, key)
+        raise AttributeError(f"Wrapped environment ({self._unwrapped.__class__.__name__}) does not have attribute '{key}'")
+    
+    def reset(self):
+        obs, _ = self._env.reset()
+        return obs, None
+    
+    def step(self, actions):
+        obs, reward, done, info = self._env.step(actions)
+        return obs, reward, done, None, info
+    
+    def render(self, *args, **kwargs):
+        return self._env.render(*args, **kwargs)
+    
+    def close(self):
+        self._env.close()
+
+    
+    def _toroidal_distance(self, p1, p2, L=1):
+        """
+        Calculate the distance on a torus between two points in N-dimensional space.
+        
+        Args:
+            p1 (np.ndarray): Coordinates of the first point (1D array).
+            p2 (np.ndarray): Coordinates of the second point (1D array).
+            L (np.ndarray): Periodic lengths in each dimension (1D array).
+            
+        Returns:
+            float: The shortest distance between p1 and p2 on the torus.
+        """
+        # Compute the absolute difference
+        delta = np.abs(p1 - p2)
+        
+        # Compute the wrapped difference
+        wrapped_delta = L - delta
+        
+        # Take the minimum distance considering wrapping
+        effective_delta = np.minimum(delta, wrapped_delta)
+        
+        # Compute the Euclidean distance
+        distance = np.sqrt(np.sum(effective_delta**2))
+        
+        return distance
+
+    @property
+    def observation_space(self):
+        return self._env.observation_space
+    
+    @property
+    def action_space(self):
+        return self._env.action_space
+    
+    @property
+    def share_observation_space(self):
+        return self._env.share_observation_space
+
 
 # single env
 class ShareDummyVecEnv(ShareVecEnv):
