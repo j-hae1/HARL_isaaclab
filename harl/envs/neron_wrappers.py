@@ -11,6 +11,11 @@ import copy
 from typing import Any, Mapping, Sequence, Tuple, Union
 from harl.models.base.neron import NeronBase
 
+#TODO get plumbing working with a base case of just a single neron or somthing like that.
+#TODO  multiagent cases
+#TODO create single agent test env
+#TODO single agent case
+
 class NeronWrapper(object):
     """
     This will transform a single agnet or multi agent enviroment into a neuron multi agent enviroment.

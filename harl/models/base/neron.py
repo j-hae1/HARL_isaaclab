@@ -4,6 +4,7 @@ from harl.utils.models_tools import get_init_method
 
 """Neron modules."""
 
+#TODO add in all parts of the neron (mixing, activation, processing, etc)
 
 class NeronBase(nn.Module):
     def __init__(self, inputs_dim, outputs_dim, recurrent_n, initialization_method):
