@@ -12,6 +12,14 @@ from typing import Any, Mapping, Sequence, Tuple, Union
 from harl.models.base.neron import NeronBase
 
 class NeronWrapper(object):
+    """
+    This will transform a single agnet or multi agent enviroment into a neuron multi agent enviroment.
+    Where each agent in the unwapped enviroment is represented by many neuron agents.
+    The neuron agents will choose connections to observation, action output, and other neurons.
+    The neurons will be orginized in a ND grid and choose connections based on position in the grid.
+    Neurons will be able to move through the grid, change connections, and process observations as their actions.
+    Each agent will be trained individually using RL and will be unaware of the other agents state.
+    """
 
     def __init__(self, env: Any, neron_args: Any) -> None:
         self._env = env
