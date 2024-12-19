@@ -52,6 +52,12 @@ def main():
         default="",
         help="If set, load existing experiment config file instead of reading from yaml config file.",
     )
+    parser.add_argument(
+        "--use_neron",
+        type=bool,
+        default=False,
+        help="If set uses neron model, by converting the environment to neron environment.",
+    )
     args, unparsed_args = parser.parse_known_args()
 
     def process(arg):
@@ -72,7 +78,7 @@ def main():
         algo_args = all_config["algo_args"]
         env_args = all_config["env_args"]
     else:  # load config from corresponding yaml file
-        algo_args, env_args = get_defaults_yaml_args(args["algo"], args["env"])
+        algo_args, env_args, neron_args = get_defaults_yaml_args(args["algo"], args["env"])
     update_args(unparsed_dict, algo_args, env_args)  # update args from command line
 
     if args["env"] == "dexhands":
@@ -82,6 +88,9 @@ def main():
     if args["env"] == "dexhands":
         algo_args["eval"]["use_eval"] = False
         algo_args["train"]["episode_length"] = env_args["hands_episode_length"]
+
+    if args["use_neron"]:
+        env_args["neron_args"] = neron_args
 
     # start training
     from harl.runners import RUNNER_REGISTRY

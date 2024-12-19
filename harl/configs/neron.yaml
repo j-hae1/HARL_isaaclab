@@ -1,0 +1,3 @@
+model:
+  name: base
+num_nerons_per_agent: 11

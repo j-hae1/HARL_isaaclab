@@ -46,6 +46,45 @@ def get_shape_from_act_space(act_space):
     return act_shape
 
 def make_train_env(env_name, seed, n_threads, env_args):
+    if "neron_args" in env_args:
+        from harl.envs.neron_wrappers import NeronWrapper
+
+        neron_args = env_args.pop("neron_args")
+
+        env = _make_train_env(env_name, seed, n_threads, env_args)
+
+        return NeronWrapper(env, neron_args=neron_args)
+    
+    return _make_train_env(env_name, seed, n_threads, env_args)
+
+def make_eval_env(env_name, seed, n_threads, env_args):
+    if "neron_args" in env_args:
+        from harl.envs.neron_wrappers import NeronWrapper
+
+        neron_args = env_args.pop("neron_args")
+
+        env = _make_eval_env(env_name, seed, n_threads, env_args)
+
+        return NeronWrapper(env, neron_args=neron_args)
+    
+    return _make_eval_env(env_name, seed, n_threads, env_args)
+
+def make_render_env(env_name, seed, env_args):
+    if "neron_args" in env_args:
+        from harl.envs.neron_wrappers import NeronWrapper
+
+        neron_args = env_args.pop("neron_args")
+        
+        env, manual_render, manual_expand_dims, manual_delay, env_num = _make_render_env(
+            env_name, seed, env_args
+        )
+
+        return NeronWrapper(env, neron_args=neron_args), manual_render, manual_expand_dims, manual_delay, env_num
+    
+    return _make_render_env(env_name, seed, env_args)
+
+
+def _make_train_env(env_name, seed, n_threads, env_args):
     """Make env for training."""
 
     if env_name == "isaaclab":
@@ -111,7 +150,7 @@ def make_train_env(env_name, seed, n_threads, env_args):
         return ShareSubprocVecEnv([get_env_fn(i) for i in range(n_threads)])
 
 
-def make_eval_env(env_name, seed, n_threads, env_args):
+def _make_eval_env(env_name, seed, n_threads, env_args):
     """Make env for evaluation."""
     if env_name == "dexhands" or env_name == "isaaclab":  # dexhands does not support running multiple instances
         raise NotImplementedError
@@ -164,7 +203,7 @@ def make_eval_env(env_name, seed, n_threads, env_args):
         return ShareSubprocVecEnv([get_env_fn(i) for i in range(n_threads)])
 
 
-def make_render_env(env_name, seed, env_args):
+def _make_render_env(env_name, seed, env_args):
     """Make env for rendering."""
     manual_render = True  # manually call the render() function
     manual_expand_dims = True  # manually expand the num_of_parallel_envs dimension
