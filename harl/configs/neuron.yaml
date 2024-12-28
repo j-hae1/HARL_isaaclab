@@ -1,5 +1,6 @@
 model:
   name: base
   neuron_input: 3
-  neuron_output: 7
-num_neurons_per_agent: 11
+num_hidden_neurons_per_agent: 1
+position_dims: 2
+speed_factor: 1
