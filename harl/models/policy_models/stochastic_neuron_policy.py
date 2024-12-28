@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from harl.utils.envs_tools import check
-from harl.models.base.neron import Neuron
+from harl.models.base.neuron import Neuron
 from harl.models.base.act import ACTLayer
 from harl.utils.envs_tools import get_shape_from_obs_space
 

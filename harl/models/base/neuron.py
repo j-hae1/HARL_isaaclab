@@ -2,13 +2,13 @@ import torch
 import torch.nn as nn
 from harl.utils.models_tools import get_init_method
 
-"""Neron modules."""
+"""neuron modules."""
 
-#TODO add in all parts of the neron (mixing, activation, processing, etc)
+#TODO add in all parts of the neuron (mixing, activation, processing, etc)
 
-class NeronBase(nn.Module):
+class neuronBase(nn.Module):
     def __init__(self, inputs_dim, outputs_dim, recurrent_n, initialization_method):
-        super(NeronBase, self).__init__()
+        super(neuronBase, self).__init__()
         self.recurrent_n = recurrent_n
         self.initialization_method = initialization_method
 
@@ -80,3 +80,11 @@ class NeronBase(nn.Module):
 
         x = self.norm(x)
         return x, hxs
+    
+    @property
+    def input_shape(self):
+        return self.rnn.input_size
+    
+    @property
+    def output_shape(self):
+        return self.rnn.hidden_size
