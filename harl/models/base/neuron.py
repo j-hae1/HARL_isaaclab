@@ -4,7 +4,9 @@ from harl.utils.models_tools import get_init_method
 
 """neuron modules."""
 
+#TODO make it the model that can be used
 #TODO add in all parts of the neuron (mixing, activation, processing, etc)
+
 
 class neuronBase(nn.Module):
     def __init__(self, inputs_dim, outputs_dim, recurrent_n, initialization_method):

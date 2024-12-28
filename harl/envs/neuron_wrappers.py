@@ -11,8 +11,8 @@ from abc import ABC, abstractmethod
 import copy
 from typing import Any, Mapping, Sequence, Tuple, Union
 
-#TODO get plumbing working with a base case of just a single neuron or somthing like that.
-#TODO  multiagent cases
+#TODO get neuron states to update
+#TODO multiagent cases
 #TODO create single agent test env
 #TODO single agent case
 
@@ -128,10 +128,13 @@ class neuronWrapper(object):
 
         env_actions, neron_actions = self._convert_actions(actions)
 
-        obs, share_obs,rewards,dones,infos,available_actions = self._env.step(env_actions)
+        obs, share_obs, rewards,dones,infos,available_actions = self._env.step(env_actions)
 
         out_obs = self._convert_observation(obs)
         out_shared = self._convert_observation(obs)
+
+        rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=1)
+        dones = np.repeat(dones, repeats=self.total_neurons_per_agent, axis=1)
 
         return out_obs, out_shared, rewards, dones, infos, available_actions
 
