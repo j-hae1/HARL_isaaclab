@@ -18,15 +18,15 @@ def get_defaults_yaml_args(algo, env):
     base_path = os.path.split(os.path.dirname(os.path.abspath(__file__)))[0]
     algo_cfg_path = os.path.join(base_path, "configs", "algos_cfgs", f"{algo}.yaml")
     env_cfg_path = os.path.join(base_path, "configs", "envs_cfgs", f"{env}.yaml")
-    neuron_cfg_path = os.path.join(base_path, "configs", "neuron.yaml")
+    neron_cfg_path = os.path.join(base_path, "configs", "neron.yaml")
 
     with open(algo_cfg_path, "r", encoding="utf-8") as file:
         algo_args = yaml.load(file, Loader=yaml.FullLoader)
     with open(env_cfg_path, "r", encoding="utf-8") as file:
         env_args = yaml.load(file, Loader=yaml.FullLoader)
-    with open(neuron_cfg_path, "r", encoding="utf-8") as file:
-        neuron_args = yaml.load(file, Loader=yaml.FullLoader)
-    return algo_args, env_args, neuron_args
+    with open(neron_cfg_path, "r", encoding="utf-8") as file:
+        neron_args = yaml.load(file, Loader=yaml.FullLoader)
+    return algo_args, env_args, neron_args
 
 
 def update_args(unparsed_dict, *args):

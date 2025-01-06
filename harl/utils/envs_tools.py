@@ -46,40 +46,40 @@ def get_shape_from_act_space(act_space):
     return act_shape
 
 def make_train_env(env_name, seed, n_threads, env_args):
-    if "neuron_args" in env_args:
-        from harl.envs.neuron_wrappers import neuronWrapper
+    if "neron_args" in env_args:
+        from harl.envs.neron_wrappers import NeronWrapper
 
-        neuron_args = env_args.pop("neuron_args")
+        neron_args = env_args.pop("neron_args")
 
         env = _make_train_env(env_name, seed, n_threads, env_args)
 
-        return neuronWrapper(env, neuron_args=neuron_args)
+        return NeronWrapper(env, neron_args=neron_args)
     
     return _make_train_env(env_name, seed, n_threads, env_args)
 
 def make_eval_env(env_name, seed, n_threads, env_args):
-    if "neuron_args" in env_args:
-        from harl.envs.neuron_wrappers import neuronWrapper
+    if "neron_args" in env_args:
+        from harl.envs.neron_wrappers import NeronWrapper
 
-        neuron_args = env_args.pop("neuron_args")
+        neron_args = env_args.pop("neron_args")
 
         env = _make_eval_env(env_name, seed, n_threads, env_args)
 
-        return neuronWrapper(env, neuron_args=neuron_args)
+        return NeronWrapper(env, neron_args=neron_args)
     
     return _make_eval_env(env_name, seed, n_threads, env_args)
 
 def make_render_env(env_name, seed, env_args):
-    if "neuron_args" in env_args:
-        from harl.envs.neuron_wrappers import neuronWrapper
+    if "neron_args" in env_args:
+        from harl.envs.neron_wrappers import NeronWrapper
 
-        neuron_args = env_args.pop("neuron_args")
+        neron_args = env_args.pop("neron_args")
         
         env, manual_render, manual_expand_dims, manual_delay, env_num = _make_render_env(
             env_name, seed, env_args
         )
 
-        return neuronWrapper(env, neuron_args=neuron_args), manual_render, manual_expand_dims, manual_delay, env_num
+        return NeronWrapper(env, neron_args=neron_args), manual_render, manual_expand_dims, manual_delay, env_num
     
     return _make_render_env(env_name, seed, env_args)
 
