@@ -28,12 +28,12 @@ class neuronWrapper(object):
 
     def __init__(self, env: Any, neuron_args: Any) -> None:
         self._env = env
+
         try:
             self._unwrapped = self._env.unwrapped
         except:
             self._unwrapped = env
 
-        
         self.num_unwrapped_agents = self._unwrapped.n_agents
         self.position_dims = neuron_args["position_dims"]
         self.neuron_input = neuron_args["model"]["neuron_input"]
@@ -119,7 +119,7 @@ class neuronWrapper(object):
         out_obs = self._convert_observation(obs)
         out_shared = self._convert_observation(obs)
 
-        return out_obs, out_shared ,other
+        return out_obs, out_shared, other
 
     def step(self, actions: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
         """
