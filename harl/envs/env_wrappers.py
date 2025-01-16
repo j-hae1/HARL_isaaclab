@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import gym
 import gymnasium
-from gymnasium.wrappers.record_video import RecordVideo
 from multiprocessing import Process, Pipe
 from abc import ABC, abstractmethod
 import copy
@@ -568,7 +567,7 @@ class IsaacLabWrapper(object):
             return {self._agent_map[k]: self._unwrapped.state_space for k in self._unwrapped.agents}
     
 
-class IsaacVideoWrapper(RecordVideo):
+class IsaacVideoWrapper(gymnasium.wrappers.RecordVideo):
 
     def step(self, action):
         """Steps through the environment using action, recording observations if :attr:`self.recording`."""
@@ -591,8 +590,5 @@ class IsaacVideoWrapper(RecordVideo):
             if self.video_length > 0:
                 if self.recorded_frames > self.video_length:
                     self.close_video_recorder()
-
-        elif self._video_enabled():
-            self.start_video_recorder()
 
         return observations, rewards, terminateds, truncateds, infos
