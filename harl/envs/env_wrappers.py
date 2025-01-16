@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import gym
 import gymnasium
+from gymnasium.wrappers.record_video import RecordVideo
 from multiprocessing import Process, Pipe
 from abc import ABC, abstractmethod
 import copy
@@ -409,17 +410,17 @@ class IsaacLabWrapper(object):
         raise AttributeError(f"Wrapped environment ({self._unwrapped.__class__.__name__}) does not have attribute '{key}'")
 
     def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
-        obs, _ = self._env.reset()
+        _obs, _ = self._env.reset()
 
         # turn obs into array with dims [batch, agent, *obs_shape]
-        obs = [o for o in obs.values()]
-        obs = torch.stack(obs, axis=1)
+        _obs = [o for o in _obs.values()]
+        obs = torch.stack(_obs, axis=1)
 
         s_obs = [self._unwrapped.state() for _ in range(self._unwrapped.num_agents)]
         if s_obs[0] != None:
             s_obs = torch.stack(s_obs, axis=1)
         else:
-            s_obs = torch.zeros((obs.shape[0],obs.shape[1],0))
+            s_obs = torch.stack(_obs, axis=1)
         
         return obs, s_obs, None
 
@@ -437,10 +438,14 @@ class IsaacLabWrapper(object):
 
         actions = {self._agent_map_inv[i]:actions[i] for i in range(self._unwrapped.num_agents)}
 
-        obs, reward, terminated, truncated, info = self._env.step(actions)
+        _obs, reward, terminated, truncated, info = self._env.step(actions)
 
-        obs = torch.stack([obs[agent] for agent in self._unwrapped.agents], axis=1)
-        s_obs = torch.stack([self._unwrapped.state() for _ in range(self._unwrapped.num_agents)], axis=1)
+        obs = torch.stack([_obs[agent] for agent in self._unwrapped.agents], axis=1)
+        s_obs = [self._unwrapped.state() for _ in range(self._unwrapped.num_agents)]
+        if s_obs[0] != None:
+            s_obs = torch.stack(s_obs, axis=1)
+        else:
+            s_obs = torch.stack([_obs[agent] for agent in self._unwrapped.agents], axis=1)
         reward = torch.stack([reward[agent] for agent in self._unwrapped.agents], axis=1)
         reward = reward.unsqueeze(-1)
         terminated = torch.stack([terminated[agent] for agent in self._unwrapped.agents], axis=1)
@@ -456,7 +461,7 @@ class IsaacLabWrapper(object):
         :return: State
         :rtype: torch.Tensor
         """
-        raise NotImplementedError
+        raise NotImplementedError 
 
     def render(self, *args, **kwargs) -> Any:
         """Render the environment
@@ -557,10 +562,13 @@ class IsaacLabWrapper(object):
     def share_observation_space(self) -> Mapping[int, gym.Space]:
         """Share observation space
         """
-        return {self._agent_map[k]: self._unwrapped.state_space for k in self._unwrapped.agents}
+        if self._unwrapped.state_space.shape[0] == 0:
+            return {self._agent_map[k]: self._unwrapped.observation_spaces[k] for k in self._unwrapped.agents}
+        else:
+            return {self._agent_map[k]: self._unwrapped.state_space for k in self._unwrapped.agents}
     
 
-class IsaacVideoWrapper(gymnasium.wrappers.RecordVideo):
+class IsaacVideoWrapper(RecordVideo):
 
     def step(self, action):
         """Steps through the environment using action, recording observations if :attr:`self.recording`."""
