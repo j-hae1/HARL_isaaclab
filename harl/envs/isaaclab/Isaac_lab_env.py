@@ -23,6 +23,8 @@ class IsaacLabEnv:
             self.env = IsaacVideoWrapper(self.env, **video_kwargs)
 
         self.env = IsaacLabWrapper(self.env)
+
+        self.unwrapped = self.env.unwrapped
         
 
         self.env_args = env_args
