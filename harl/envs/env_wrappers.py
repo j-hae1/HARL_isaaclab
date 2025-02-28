@@ -1,6 +1,7 @@
 """
 Modified from OpenAI Baselines code to work with multi-agent envs
 """
+import gymnasium.spaces.box
 import numpy as np
 import torch
 import gym
@@ -489,7 +490,7 @@ class IsaacLabWrapper(object):
         if s_obs[0] != None:
             s_obs = self.stack_padded_tensors_last_axis(s_obs, 0)
         else:
-            s_obs = torch.zeros_like(obs)
+            s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for _ in self.unwrapped.agents])
         
         return obs, s_obs, None
 
@@ -511,10 +512,12 @@ class IsaacLabWrapper(object):
 
         obs = self.stack_padded_tensors_last_axis([_obs[agent] for agent in self.unwrapped.agents])
         s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
+        
         if s_obs[0] != None:
             s_obs = self.stack_padded_tensors_last_axis(s_obs)
         else:
-            s_obs = self.stack_padded_tensors_last_axis([_obs[agent] for agent in self.unwrapped.agents])
+            s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for agent in self.unwrapped.agents])
+
         reward = torch.stack([reward[agent] for agent in self.unwrapped.agents], axis=1)
         reward = reward.unsqueeze(-1)
         terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
@@ -640,8 +643,12 @@ class IsaacLabWrapper(object):
                 max_shape = val.shape[0]
                 max_obs_key = key
 
+        shape = self.unwrapped.observation_spaces[max_obs_key].shape[0]*len(self.unwrapped.observation_spaces.items())
+        high = self.unwrapped.observation_spaces[max_obs_key].high[0]
+        low = self.unwrapped.observation_spaces[max_obs_key].low[0]
+
         if self.unwrapped.state_space.shape[0] == 0:
-            return {self._agent_map[k]: self.unwrapped.observation_spaces[max_obs_key] for k in self.unwrapped.agents}
+            return {self._agent_map[k]: gymnasium.spaces.Box(low,high,(shape,)) for k in self.unwrapped.agents}
         else:
             return {self._agent_map[k]: self.unwrapped.state_space for k in self.unwrapped.agents}
     
