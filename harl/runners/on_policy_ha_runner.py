@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 from harl.utils.trans_tools import _t2n
+from harl.utils.models_tools import torch_nanstd
 from harl.runners.on_policy_base_runner import OnPolicyBaseRunner
 
 
@@ -13,13 +14,13 @@ class OnPolicyHARunner(OnPolicyBaseRunner):
         actor_train_infos = []
 
         # factor is used for considering updates made by previous agents
-        factor = np.ones(
+        factor = torch.ones(
             (
                 self.algo_args["train"]["episode_length"],
                 self.algo_args["train"]["n_rollout_threads"],
                 1,
             ),
-            dtype=np.float32,
+            dtype=torch.float32, device=self.device,
         )
 
         # compute advantages
@@ -37,17 +38,17 @@ class OnPolicyHARunner(OnPolicyBaseRunner):
             active_masks_collector = [
                 self.actor_buffer[i].active_masks for i in range(self.num_agents)
             ]
-            active_masks_array = np.stack(active_masks_collector, axis=2)
-            advantages_copy = advantages.copy()
-            advantages_copy[active_masks_array[:-1] == 0.0] = np.nan
-            mean_advantages = np.nanmean(advantages_copy)
-            std_advantages = np.nanstd(advantages_copy)
+            active_masks_array = torch.stack(active_masks_collector, axis=2)
+            advantages_copy = advantages.clone()
+            advantages_copy[active_masks_array[:-1] == 0.0] = torch.nan
+            mean_advantages = torch.nanmean(advantages_copy)
+            std_advantages = torch_nanstd(advantages_copy)
             advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
 
         if self.fixed_order:
             agent_order = list(range(self.num_agents))
         else:
-            agent_order = list(torch.randperm(self.num_agents).numpy())
+            agent_order = list(torch.randperm(self.num_agents))
         for agent_id in agent_order:
             self.actor_buffer[agent_id].update_factor(
                 factor
@@ -85,11 +86,11 @@ class OnPolicyHARunner(OnPolicyBaseRunner):
             # update actor
             if self.state_type == "EP":
                 actor_train_info = self.actor[agent_id].train(
-                    self.actor_buffer[agent_id], advantages.copy(), "EP"
+                    self.actor_buffer[agent_id], advantages.clone(), "EP"
                 )
             elif self.state_type == "FP":
                 actor_train_info = self.actor[agent_id].train(
-                    self.actor_buffer[agent_id], advantages[:, :, agent_id].copy(), "FP"
+                    self.actor_buffer[agent_id], advantages[:, :, agent_id].clone(), "FP"
                 )
 
             # compute action log probs for updated agent
@@ -113,7 +114,7 @@ class OnPolicyHARunner(OnPolicyBaseRunner):
             )
 
             # update factor for next agent
-            factor = factor * _t2n(
+            factor = factor * (
                 getattr(torch, self.action_aggregation)(
                     torch.exp(new_actions_logprob - old_actions_logprob), dim=-1
                 ).reshape(
@@ -122,6 +123,9 @@ class OnPolicyHARunner(OnPolicyBaseRunner):
                     1,
                 )
             )
+
+            factor.detach_()
+            
             actor_train_infos.append(actor_train_info)
 
         # update critic

@@ -13,6 +13,7 @@ from harl.utils.trpo_util import (
 )
 from harl.algorithms.actors.on_policy_base import OnPolicyBase
 from harl.models.policy_models.stochastic_policy import StochasticPolicy
+from harl.utils.models_tools import torch_nanstd
 
 
 class HATRPO(OnPolicyBase):
@@ -40,8 +41,8 @@ class HATRPO(OnPolicyBase):
             sample: (Tuple) contains data batch with which to update networks.
         Returns:
             kl: (torch.Tensor) KL divergence between old and new policy.
-            loss_improve: (np.float32) loss improvement.
-            expected_improve: (np.ndarray) expected loss improvement.
+            loss_improve: (torch.float32) loss improvement.
+            expected_improve: (torch.ndarray) expected loss improvement.
             dist_entropy: (torch.Tensor) action entropies.
             ratio: (torch.Tensor) ratio between new and old policy.
         """
@@ -197,7 +198,7 @@ class HATRPO(OnPolicyBase):
         """Perform a training update using minibatch GD.
         Args:
             actor_buffer: (OnPolicyActorBuffer) buffer containing training data related to actor.
-            advantages: (np.ndarray) advantages.
+            advantages: (torch.ndarray) advantages.
             state_type: (str) type of state.
         Returns:
             train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
@@ -209,14 +210,14 @@ class HATRPO(OnPolicyBase):
         train_info["expected_improve"] = 0
         train_info["ratio"] = 0
 
-        if np.all(actor_buffer.active_masks[:-1] == 0.0):
+        if torch.all(actor_buffer.active_masks[:-1] == 0.0):
             return train_info
 
         if state_type == "EP":
-            advantages_copy = advantages.copy()
-            advantages_copy[actor_buffer.active_masks[:-1] == 0.0] = np.nan
-            mean_advantages = np.nanmean(advantages_copy)
-            std_advantages = np.nanstd(advantages_copy)
+            advantages_copy = advantages.clone()
+            advantages_copy[actor_buffer.active_masks[:-1] == 0.0] = torch.nan
+            mean_advantages = torch.nanmean(advantages_copy)
+            std_advantages = torch_nanstd(advantages_copy)
             advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
 
         if self.use_recurrent_policy:

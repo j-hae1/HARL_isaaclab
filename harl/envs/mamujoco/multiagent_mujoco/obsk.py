@@ -228,7 +228,7 @@ def get_parts_and_edges(label, partitioning):
 
         return parts, edges, globals
 
-    elif label in ["Ant-v2"]:
+    elif label in ["Ant-v2", "isaac_factor_ant-v2"]:
         # define Mujoco graph
         torso = 1
         front_left_leg = 2

@@ -3,12 +3,13 @@ import torch
 import numpy as np
 from harl.utils.envs_tools import get_shape_from_obs_space
 from harl.utils.trans_tools import _flatten, _sa_cast
+from harl.utils.models_tools import init_device
 
 
 class OnPolicyCriticBufferEP:
     """On-policy buffer for critic that uses Environment-Provided (EP) state."""
 
-    def __init__(self, args, share_obs_space):
+    def __init__(self, args, share_obs_space, device="cuda:0"):
         """Initialize on-policy critic buffer.
         Args:
             args: (dict) arguments
@@ -23,50 +24,51 @@ class OnPolicyCriticBufferEP:
         self.gae_lambda = args["gae_lambda"]
         self.use_gae = args["use_gae"]
         self.use_proper_time_limits = args["use_proper_time_limits"]
+        self.device = device
 
         share_obs_shape = get_shape_from_obs_space(share_obs_space)
         if isinstance(share_obs_shape[-1], list):
             share_obs_shape = share_obs_shape[:1]
 
         # Buffer for share observations
-        self.share_obs = np.zeros(
+        self.share_obs = torch.zeros(
             (self.episode_length + 1, self.n_rollout_threads, *share_obs_shape),
-            dtype=np.float32,
+            dtype=torch.float32, device=self.device
         )
 
         # Buffer for rnn states of critic
-        self.rnn_states_critic = np.zeros(
+        self.rnn_states_critic = torch.zeros(
             (
                 self.episode_length + 1,
                 self.n_rollout_threads,
                 self.recurrent_n,
                 self.rnn_hidden_size,
             ),
-            dtype=np.float32,
+            dtype=torch.float32, device=self.device
         )
 
         # Buffer for value predictions made by this critic
-        self.value_preds = np.zeros(
-            (self.episode_length + 1, self.n_rollout_threads, 1), dtype=np.float32
+        self.value_preds = torch.zeros(
+            (self.episode_length + 1, self.n_rollout_threads, 1), dtype=torch.float32, device=self.device
         )
 
         # Buffer for returns calculated at each timestep
-        self.returns = np.zeros(
-            (self.episode_length + 1, self.n_rollout_threads, 1), dtype=np.float32
+        self.returns = torch.zeros(
+            (self.episode_length + 1, self.n_rollout_threads, 1), dtype=torch.float32,device=self.device
         )
 
         # Buffer for rewards received by agents at each timestep
-        self.rewards = np.zeros(
-            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        self.rewards = torch.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=torch.float32,device=self.device
         )
 
         # Buffer for masks indicating whether an episode is done at each timestep
-        self.masks = np.ones(
-            (self.episode_length + 1, self.n_rollout_threads, 1), dtype=np.float32
+        self.masks = torch.ones(
+            (self.episode_length + 1, self.n_rollout_threads, 1), dtype=torch.float32,device=self.device
         )
 
         # Buffer for bad masks indicating truncation and termination. If 0, trunction; if 1 and masks is 0, termination; else, not done yet.
-        self.bad_masks = np.ones_like(self.masks)
+        self.bad_masks = torch.ones_like(self.masks,device=self.device)
 
         self.step = 0
 
@@ -74,30 +76,30 @@ class OnPolicyCriticBufferEP:
         self, share_obs, rnn_states_critic, value_preds, rewards, masks, bad_masks
     ):
         """Insert data into buffer."""
-        self.share_obs[self.step + 1] = share_obs.copy()
-        self.rnn_states_critic[self.step + 1] = rnn_states_critic.copy()
-        self.value_preds[self.step] = value_preds.copy()
-        self.rewards[self.step] = rewards.copy()
-        self.masks[self.step + 1] = masks.copy()
-        self.bad_masks[self.step + 1] = bad_masks.copy()
+        self.share_obs[self.step + 1] = share_obs.clone()
+        self.rnn_states_critic[self.step + 1] = rnn_states_critic.clone()
+        self.value_preds[self.step] = value_preds.clone()
+        self.rewards[self.step] = rewards.clone()
+        self.masks[self.step + 1] = masks.clone()
+        self.bad_masks[self.step + 1] = bad_masks.clone()
 
         self.step = (self.step + 1) % self.episode_length
 
     def after_update(self):
         """After an update, copy the data at the last step to the first position of the buffer."""
-        self.share_obs[0] = self.share_obs[-1].copy()
-        self.rnn_states_critic[0] = self.rnn_states_critic[-1].copy()
-        self.masks[0] = self.masks[-1].copy()
-        self.bad_masks[0] = self.bad_masks[-1].copy()
+        self.share_obs[0] = self.share_obs[-1].clone()
+        self.rnn_states_critic[0] = self.rnn_states_critic[-1].clone()
+        self.masks[0] = self.masks[-1].clone()
+        self.bad_masks[0] = self.bad_masks[-1].clone()
 
     def get_mean_rewards(self):
         """Get mean rewards for logging."""
-        return np.mean(self.rewards)
+        return torch.mean(self.rewards)
 
     def compute_returns(self, next_value, value_normalizer=None):
         """Compute returns either as discounted sum of rewards, or using GAE.
         Args:
-            next_value: (np.ndarray) value predictions for the step after the last episode step.
+            next_value: (torch.ndarray) value predictions for the step after the last episode step.
             value_normalizer: (ValueNorm) If not None, ValueNorm value normalizer instance.
         """
         if (
@@ -351,12 +353,12 @@ class OnPolicyCriticBufferEP:
 
             L, N = data_chunk_length, mini_batch_size
             # These are all ndarrays of size (data_chunk_length, mini_batch_size, *dim)
-            share_obs_batch = np.stack(share_obs_batch, axis=1)
-            value_preds_batch = np.stack(value_preds_batch, axis=1)
-            return_batch = np.stack(return_batch, axis=1)
-            masks_batch = np.stack(masks_batch, axis=1)
+            share_obs_batch = torch.stack(share_obs_batch, axis=1)
+            value_preds_batch = torch.stack(value_preds_batch, axis=1)
+            return_batch = torch.stack(return_batch, axis=1)
+            masks_batch = torch.stack(masks_batch, axis=1)
             # rnn_states_critic_batch is a (mini_batch_size, *dim) ndarray
-            rnn_states_critic_batch = np.stack(rnn_states_critic_batch).reshape(
+            rnn_states_critic_batch = torch.stack(rnn_states_critic_batch).reshape(
                 N, *self.rnn_states_critic.shape[2:]
             )
 
