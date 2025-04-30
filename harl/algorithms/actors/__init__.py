@@ -21,4 +21,5 @@ ALGO_REGISTRY = {
     "maddpg": MADDPG,
     "matd3": MATD3,
     "mappo": MAPPO,
+    "mappo_unshare": MAPPO,
 }

@@ -87,6 +87,6 @@ class ValueNorm(nn.Module):
             + mean[(None,) * self.norm_axes]
         )
 
-        out = out.cpu().numpy()
+        # out = out.cpu().numpy()
 
         return out

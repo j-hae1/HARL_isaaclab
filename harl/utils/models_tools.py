@@ -24,6 +24,23 @@ def init_device(args):
     torch.set_num_threads(args["torch_threads"])
     return device
 
+def torch_nanstd(x, dim=None, keepdim=False, unbiased=True):
+    # mask for non-NaN values
+    mask = ~torch.isnan(x)
+    # count non-NaN elements
+    count = mask.sum(dim=dim, keepdim=True)
+    # zero out NaNs
+    x_masked = torch.where(mask, x, torch.zeros_like(x))
+    # compute mean ignoring NaNs
+    mean = x_masked.sum(dim=dim, keepdim=True) / count
+    # compute squared differences
+    sq_diff = torch.where(mask, (x - mean) ** 2, torch.zeros_like(x))
+    # compute variance
+    if unbiased:
+        count = count - 1
+    var = sq_diff.sum(dim=dim, keepdim=keepdim) / count
+    return torch.sqrt(var)
+
 
 def get_active_func(activation_func):
     """Get the activation function.

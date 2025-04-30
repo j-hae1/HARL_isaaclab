@@ -4,12 +4,13 @@ import torch
 import numpy as np
 from harl.utils.trans_tools import _flatten, _sa_cast
 from harl.utils.envs_tools import get_shape_from_obs_space, get_shape_from_act_space
+from harl.utils.models_tools import init_device
 
 
 class OnPolicyActorBuffer:
     """On-policy buffer for actor data storage."""
 
-    def __init__(self, args, obs_space, act_space):
+    def __init__(self, args, obs_space, act_space, device="cuda:0"):
         """Initialize on-policy actor buffer.
         Args:
             args: (dict) arguments
@@ -21,6 +22,7 @@ class OnPolicyActorBuffer:
         self.hidden_sizes = args["hidden_sizes"]
         self.rnn_hidden_size = self.hidden_sizes[-1]
         self.recurrent_n = args["recurrent_n"]
+        self.device = device
 
         obs_shape = get_shape_from_obs_space(obs_space)
 
@@ -28,27 +30,27 @@ class OnPolicyActorBuffer:
             obs_shape = obs_shape[:1]
 
         # Buffer for observations of this actor.
-        self.obs = np.zeros(
+        self.obs = torch.zeros(
             (self.episode_length + 1, self.n_rollout_threads, *obs_shape),
-            dtype=np.float32,
+            dtype=torch.float32, device=self.device,
         )
 
         # Buffer for rnn states of this actor.
-        self.rnn_states = np.zeros(
+        self.rnn_states = torch.zeros(
             (
                 self.episode_length + 1,
                 self.n_rollout_threads,
                 self.recurrent_n,
                 self.rnn_hidden_size,
             ),
-            dtype=np.float32,
+            dtype=torch.float32, device=self.device,
         )
 
         # Buffer for available actions of this actor.
         if act_space.__class__.__name__ == "Discrete":
-            self.available_actions = np.ones(
+            self.available_actions = torch.ones(
                 (self.episode_length + 1, self.n_rollout_threads, act_space.n),
-                dtype=np.float32,
+                dtype=torch.float32, device=self.device,
             )
         else:
             self.available_actions = None
@@ -56,20 +58,20 @@ class OnPolicyActorBuffer:
         act_shape = get_shape_from_act_space(act_space)
 
         # Buffer for actions of this actor.
-        self.actions = np.zeros(
-            (self.episode_length, self.n_rollout_threads, act_shape), dtype=np.float32
+        self.actions = torch.zeros(
+            (self.episode_length, self.n_rollout_threads, act_shape), dtype=torch.float32,device=self.device,
         )
 
         # Buffer for action log probs of this actor.
-        self.action_log_probs = np.zeros(
-            (self.episode_length, self.n_rollout_threads, act_shape), dtype=np.float32
+        self.action_log_probs = torch.zeros(
+            (self.episode_length, self.n_rollout_threads, act_shape), dtype=torch.float32,device=self.device,
         )
 
         # Buffer for masks of this actor. Masks denotes at which point should the rnn states be reset.
-        self.masks = np.ones((self.episode_length + 1, self.n_rollout_threads, 1), dtype=np.float32)
+        self.masks = torch.ones((self.episode_length + 1, self.n_rollout_threads, 1), dtype=torch.float32,device=self.device,)
 
         # Buffer for active masks of this actor. Active masks denotes whether the agent is alive.
-        self.active_masks = np.ones_like(self.masks)
+        self.active_masks = torch.ones_like(self.masks,device=self.device)
 
         self.factor = None
 
@@ -77,7 +79,7 @@ class OnPolicyActorBuffer:
 
     def update_factor(self, factor):
         """Save factor for this actor."""
-        self.factor = factor.copy()
+        self.factor = factor.clone()
 
     def insert(
         self,
@@ -91,30 +93,30 @@ class OnPolicyActorBuffer:
     ):
         """Insert data into actor buffer."""
         obs_space = self.obs.shape[-1]
-        self.obs[self.step + 1] = obs[:,:obs_space].copy()
+        self.obs[self.step + 1] = obs[:,:obs_space].clone()
         
-        self.rnn_states[self.step + 1] = rnn_states.copy()
+        self.rnn_states[self.step + 1] = rnn_states.clone()
 
         act_space = self.actions.shape[-1]
-        self.actions[self.step] = actions[:,:act_space].copy()
+        self.actions[self.step] = actions[:,:act_space].clone()
 
-        self.action_log_probs[self.step] = action_log_probs[:,:act_space].copy()
-        self.masks[self.step + 1] = masks.copy()
+        self.action_log_probs[self.step] = action_log_probs[:,:act_space].clone()
+        self.masks[self.step + 1] = masks.clone()
         if active_masks is not None:
-            self.active_masks[self.step + 1] = active_masks.copy()
+            self.active_masks[self.step + 1] = active_masks.clone()
         if available_actions is not None:
-            self.available_actions[self.step + 1] = available_actions.copy()
+            self.available_actions[self.step + 1] = available_actions.clone()
 
         self.step = (self.step + 1) % self.episode_length
 
     def after_update(self):
         """After an update, copy the data at the last step to the first position of the buffer."""
-        self.obs[0] = self.obs[-1].copy()
-        self.rnn_states[0] = self.rnn_states[-1].copy()
-        self.masks[0] = self.masks[-1].copy()
-        self.active_masks[0] = self.active_masks[-1].copy()
+        self.obs[0] = self.obs[-1].clone()
+        self.rnn_states[0] = self.rnn_states[-1].clone()
+        self.masks[0] = self.masks[-1].clone()
+        self.active_masks[0] = self.active_masks[-1].clone()
         if self.available_actions is not None:
-            self.available_actions[0] = self.available_actions[-1].copy()
+            self.available_actions[0] = self.available_actions[-1].clone()
 
     def feed_forward_generator_actor(
         self, advantages, actor_num_mini_batch=None, mini_batch_size=None
@@ -299,18 +301,18 @@ class OnPolicyActorBuffer:
             
             L, N = data_chunk_length, mini_batch_size
             # These are all ndarrays of size (data_chunk_length, mini_batch_size, *dim)
-            obs_batch = np.stack(obs_batch, axis=1)
-            actions_batch = np.stack(actions_batch, axis=1)
+            obs_batch = torch.stack(obs_batch, axis=1)
+            actions_batch = torch.stack(actions_batch, axis=1)
             if self.available_actions is not None:
-                available_actions_batch = np.stack(available_actions_batch, axis=1)
+                available_actions_batch = torch.stack(available_actions_batch, axis=1)
             if self.factor is not None:
-                factor_batch = np.stack(factor_batch, axis=1)
-            masks_batch = np.stack(masks_batch, axis=1)
-            active_masks_batch = np.stack(active_masks_batch, axis=1)
-            old_action_log_probs_batch = np.stack(old_action_log_probs_batch, axis=1)
-            adv_targ = np.stack(adv_targ, axis=1)
+                factor_batch = torch.stack(factor_batch, axis=1)
+            masks_batch = torch.stack(masks_batch, axis=1)
+            active_masks_batch = torch.stack(active_masks_batch, axis=1)
+            old_action_log_probs_batch = torch.stack(old_action_log_probs_batch, axis=1)
+            adv_targ = torch.stack(adv_targ, axis=1)
             # rnn_states_batch is a (mini_batch_size, *dim) ndarray
-            rnn_states_batch = np.stack(rnn_states_batch).reshape(N, *self.rnn_states.shape[2:])
+            rnn_states_batch = torch.stack(rnn_states_batch).reshape(N, *self.rnn_states.shape[2:])
 
             # flatten the (data_chunk_length, mini_batch_size, *dim) ndarrays to (data_chunk_length * mini_batch_size, *dim)
             obs_batch = _flatten(L, N, obs_batch)

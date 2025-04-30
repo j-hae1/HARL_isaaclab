@@ -13,15 +13,15 @@ device:
   torch_threads: 4
 train:
   # number of parallel environments for training data collection
-  n_rollout_threads: 20
+  n_rollout_threads: 512
   # number of total training steps
   num_env_steps: 10000000
   # number of steps per environment per training data collection
-  episode_length: 200
+  episode_length: 8
   # logging interval
-  log_interval: 5
+  log_interval: 1
   # evaluation interval
-  eval_interval: 25
+  eval_interval: 2
   # whether to use ValueNorm
   use_valuenorm: True
   # whether to use linear learning rate decay
@@ -29,17 +29,17 @@ train:
   # whether to consider the case of truncation when an episode is done
   use_proper_time_limits: True
   # if set, load models from this directory; otherwise, randomly initialise the models
-  model_dir: ~
+  model_dir: #/home/jakehate/spot-issaclab/Data/data/results/isaaclab/Isaac-Ant-Factorized-v0/happo/ant-fact-mujoco/seed-00002-2025-03-24-06-47-07/models
 eval:
   # whether to use evaluation
-  use_eval: True
+  use_eval: False
   # number of parallel environments for evaluation
   n_eval_rollout_threads: 10
   # number of episodes per evaluation
   eval_episodes: 20
 render:
-  # whether to use render
-  use_render: False
+  # whether to use render export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLEW.so
+  use_render: True
   # number of episodes to render
   render_episodes: 10
 model:
@@ -65,9 +65,9 @@ model:
   data_chunk_length: 10
   # optimizer parameters
   # actor learning rate
-  lr: 0.0005
+  lr: 0.001
   # critic learning rate
-  critic_lr: 0.0005
+  critic_lr: 0.001
   # eps in Adam
   opti_eps: 0.00001
   # weight_decay in Adam
@@ -87,9 +87,9 @@ algo:
   # clip parameter
   clip_param: 0.2
   # number of mini-batches per epoch for actor update
-  actor_num_mini_batch: 1
+  actor_num_mini_batch: 4
   # number of mini-batches per epoch for critic update
-  critic_num_mini_batch: 1
+  critic_num_mini_batch: 4
   # coefficient for entropy term in actor loss
   entropy_coef: 0.01
   # coefficient for value loss

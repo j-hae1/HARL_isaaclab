@@ -29,12 +29,15 @@ class OnPolicyBaseRunner:
             algo_args: arguments related to algo, loaded from config file and updated with unparsed command-line arguments.
             env_args: arguments related to env, loaded from config file and updated with unparsed command-line arguments.
         """
+
         self.args = args
         self.algo_args = algo_args
         self.env_args = env_args
-        self.best_avg_reward = -np.inf
+        self.best_avg_reward = -torch.inf
         self.hidden_sizes = algo_args["model"]["hidden_sizes"]
+        self.hidden_sizes_critic = algo_args["model"]["hidden_sizes"]
         self.rnn_hidden_size = self.hidden_sizes[-1]
+        self.rnn_hidden_size_critic = self.hidden_sizes_critic[-1]
         self.recurrent_n = algo_args["model"]["recurrent_n"]
         self.action_aggregation = algo_args["algo"]["action_aggregation"]
         self.state_type = env_args.get("state_type", "EP")
@@ -82,6 +85,7 @@ class OnPolicyBaseRunner:
                 if algo_args["eval"]["use_eval"]
                 else None
             )
+            
         self.num_agents = get_num_agents(args["env"], env_args, self.env)
 
         print("share_observation_space: ", self.env.share_observation_space)
@@ -127,7 +131,7 @@ class OnPolicyBaseRunner:
                     device=self.device,
                 )
                 self.actor.append(agent)
-
+        algo_args["model"]["hidden_sizes"] = self.hidden_sizes_critic
         if self.algo_args["render"]["use_render"] is False:  # train, not render
             self.actor_buffer = []
             for agent_id in range(self.num_agents):
@@ -139,11 +143,13 @@ class OnPolicyBaseRunner:
                 self.actor_buffer.append(ac_bu)
 
             share_observation_space = self.env.share_observation_space[0]
+            
             self.critic = VCritic(
                 {**algo_args["model"], **algo_args["algo"]},
                 share_observation_space,
                 device=self.device,
             )
+
             if self.state_type == "EP":
                 # EP stands for Environment Provided, as phrased by MAPPO paper.
                 # In EP, the global states for all agents are the same.
@@ -166,10 +172,11 @@ class OnPolicyBaseRunner:
                 self.value_normalizer = ValueNorm(1, device=self.device)
             else:
                 self.value_normalizer = None
-
+            
             self.logger = LOGGER_REGISTRY[args["env"]](
                 args, algo_args, env_args, self.num_agents, self.writter, self.run_dir
             )
+        self.algo_args["model"]["hidden_sizes"] = self.hidden_sizes
         if self.algo_args["train"]["model_dir"] is not None:  # restore model
             self.restore()
 
@@ -179,6 +186,7 @@ class OnPolicyBaseRunner:
             self.render()
             return
         print("start running")
+        
         self.warmup()
 
         episodes = (
@@ -203,49 +211,79 @@ class OnPolicyBaseRunner:
             self.logger.episode_init(
                 episode
             )  # logger callback at the beginning of each episode
+            with torch.inference_mode():
+                self.prep_rollout()  # change to eval mode
+                for step in range(self.algo_args["train"]["episode_length"]):
+                    # Sample actions from actors and values from critics
+                    (
+                        values,
+                        actions,
+                        action_log_probs,
+                        rnn_states,
+                        rnn_states_critic,
+                    ) = self.collect(step)
+                    # actions: (n_threads, n_agents, action_dim)
+                    if self.not_tensor:
+                        (
+                            obs,
+                            share_obs,
+                            rewards,
+                            dones,
+                            infos,
+                            available_actions,
+                        ) = self.env.step(actions.cpu().numpy())
 
-            self.prep_rollout()  # change to eval mode
-            for step in range(self.algo_args["train"]["episode_length"]):
-                # Sample actions from actors and values from critics
-                (
-                    values,
-                    actions,
-                    action_log_probs,
-                    rnn_states,
-                    rnn_states_critic,
-                ) = self.collect(step)
-                # actions: (n_threads, n_agents, action_dim)
-                (
-                    obs,
-                    share_obs,
-                    rewards,
-                    dones,
-                    infos,
-                    available_actions,
-                ) = self.env.step(actions)
-                # obs: (n_threads, n_agents, obs_dim)
-                # share_obs: (n_threads, n_agents, share_obs_dim)
-                # rewards: (n_threads, n_agents, 1)
-                # dones: (n_threads, n_agents)
-                # infos: (n_threads)
-                # available_actions: (n_threads, ) of None or (n_threads, n_agents, action_number)
-                data = (
-                    obs,
-                    share_obs,
-                    rewards,
-                    dones,
-                    infos,
-                    available_actions,
-                    values,
-                    actions,
-                    action_log_probs,
-                    rnn_states,
-                    rnn_states_critic,
-                )
+                        obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
+                        share_obs = torch.tensor(share_obs, dtype=torch.float32, device=self.device)
+                        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+                        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
 
-                self.logger.per_step(data)  # logger callback at each step
+                    else:
+                        (
+                            obs,
+                            share_obs,
+                            rewards,
+                            dones,
+                            infos,
+                            available_actions,
+                        ) = self.env.step(actions)
+                    
+                    # obs: (n_threads, n_agents, obs_dim)
+                    # share_obs: (n_threads, n_agents, share_obs_dim)
+                    # rewards: (n_threads, n_agents, 1)
+                    # dones: (n_threads, n_agents)
+                    # infos: (n_threads)
+                    # available_actions: (n_threads, ) of None or (n_threads, n_agents, action_number)
+                    data = (
+                        obs,
+                        share_obs,
+                        rewards,
+                        dones,
+                        infos,
+                        available_actions,
+                        values,
+                        actions,
+                        action_log_probs,
+                        rnn_states,
+                        rnn_states_critic,
+                    )
+                    if hasattr(self.env, "log_info"):
+                        self.logger.per_step(self.env.log_info)  # logger callback at each step
+                    else:
+                        a_infos = {}
+                        for info in infos:
+                            for i in range(len(info)):
+                                for key, val in info[i].items():
+                                    if "reward" in key:
+                                        if key not in a_infos:
+                                            a_infos[key] = []
+                                        a_infos[key].append(val)
+                                
+                        for key, val in a_infos.items():
+                            a_infos[key] = np.mean(val)
+                        self.logger.per_step(a_infos)
 
-                self.insert(data)  # insert data into buffer
+                    self.insert(data)  # insert data into buffer
 
             # compute return and update network
             self.compute()
@@ -262,12 +300,13 @@ class OnPolicyBaseRunner:
                     self.critic_buffer,
                 )
 
-            # eval
-            if self.logger.aver_episode_rewards is not None:
-                if self.logger.aver_episode_rewards > self.best_avg_reward:
-                    self.best_avg_reward = self.logger.aver_episode_rewards
-                    self.save(Path(Path(self.save_dir).parent, 'best_model'))
 
+            
+            if hasattr(self.logger,"total_reward") and self.logger.total_reward > self.best_avg_reward:
+                self.best_avg_reward = self.logger.total_reward
+                self.save(Path(Path(self.save_dir).parent, 'best_model'))
+            
+            # eval
             if episode % self.algo_args["train"]["eval_interval"] == 0:
                 if self.algo_args["eval"]["use_eval"]:
                     self.prep_rollout()
@@ -279,22 +318,29 @@ class OnPolicyBaseRunner:
     def warmup(self):
         """Warm up the replay buffer."""
         # reset env
-        obs, share_obs, available_actions = self.env.reset()
-        # replay buffer
-        for agent_id in range(self.num_agents):
-            obs_space = self.env.observation_space[agent_id].shape[0]
-            self.actor_buffer[agent_id].obs[0] = obs[:, agent_id, :obs_space].copy()
-            if self.actor_buffer[agent_id].available_actions is not None:
-                self.actor_buffer[agent_id].available_actions[0] = available_actions[
-                    :, agent_id
-                ].copy()
+        with torch.inference_mode():
+            obs, share_obs, available_actions = self.env.reset()
+            #check if obs is already a torch tensor
+            if not isinstance(obs, torch.Tensor):
+                obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
+                share_obs = torch.tensor(share_obs, dtype=torch.float32, device=self.device)
+                self.not_tensor = True
+            else:
+                self.not_tensor = False
+            # replay buffer
+            for agent_id in range(self.num_agents):
+                obs_space = self.env.observation_space[agent_id].shape[0]
+                self.actor_buffer[agent_id].obs[0] = obs[:, agent_id, :obs_space].clone()
+                if self.actor_buffer[agent_id].available_actions is not None:
+                    self.actor_buffer[agent_id].available_actions[0] = available_actions[
+                        :, agent_id
+                    ].clone()
 
-        if self.state_type == "EP":
-            self.critic_buffer.share_obs[0] = share_obs[:, 0].copy()
-        elif self.state_type == "FP":
-            self.critic_buffer.share_obs[0] = share_obs.copy()
+            if self.state_type == "EP":
+                self.critic_buffer.share_obs[0] = share_obs[:, 0].clone()
+            elif self.state_type == "FP":
+                self.critic_buffer.share_obs[0] = share_obs.clone()
 
-    @torch.no_grad()
     def collect(self, step):
         """Collect actions and values from actors and critics.
         Args:
@@ -303,60 +349,61 @@ class OnPolicyBaseRunner:
             values, actions, action_log_probs, rnn_states, rnn_states_critic
         """
         # collect actions, action_log_probs, rnn_states from n actors
-        action_collector = []
-        action_log_prob_collector = []
-        rnn_state_collector = []
-        for agent_id in range(self.num_agents):
-            action, action_log_prob, rnn_state = self.actor[agent_id].get_actions(
-                self.actor_buffer[agent_id].obs[step],
-                self.actor_buffer[agent_id].rnn_states[step],
-                self.actor_buffer[agent_id].masks[step],
-                self.actor_buffer[agent_id].available_actions[step]
-                if self.actor_buffer[agent_id].available_actions is not None
-                else None,
-            )
-            action_collector.append(_t2n(action))
-            action_log_prob_collector.append(_t2n(action_log_prob))
-            rnn_state_collector.append(_t2n(rnn_state))
-        # (n_agents, n_threads, dim) -> (n_threads, n_agents, dim)
-
-        if self.is_heter_action_space:
-            for i in range(len(action_collector)):
-                pad_diff = self.max_action_space - action_collector[i].shape[1]
-                if pad_diff > 0:
-                    action_collector[i] = np.pad(action_collector[i], [(0,0), (0,pad_diff)])
-                    action_log_prob_collector[i] = np.pad(action_log_prob_collector[i], [(0,0), (0,pad_diff)])
-        
-        actions = np.array(action_collector).transpose(1, 0, 2)
-        # actions = np.array(action_collector).transpose(1, 0, 2)
-        action_log_probs = np.array(action_log_prob_collector).transpose(1, 0, 2)
-        rnn_states = np.array(rnn_state_collector).transpose(1, 0, 2, 3)
-
-        # collect values, rnn_states_critic from 1 critic
-        if self.state_type == "EP":
-            value, rnn_state_critic = self.critic.get_values(
-                self.critic_buffer.share_obs[step],
-                self.critic_buffer.rnn_states_critic[step],
-                self.critic_buffer.masks[step],
-            )
-            # (n_threads, dim)
-            values = _t2n(value)
-            rnn_states_critic = _t2n(rnn_state_critic)
-        elif self.state_type == "FP":
-            value, rnn_state_critic = self.critic.get_values(
-                np.concatenate(self.critic_buffer.share_obs[step]),
-                np.concatenate(self.critic_buffer.rnn_states_critic[step]),
-                np.concatenate(self.critic_buffer.masks[step]),
-            )  # concatenate (n_threads, n_agents, dim) into (n_threads * n_agents, dim)
-            # split (n_threads * n_agents, dim) into (n_threads, n_agents, dim)
-            values = np.array(
-                np.split(_t2n(value), self.algo_args["train"]["n_rollout_threads"])
-            )
-            rnn_states_critic = np.array(
-                np.split(
-                    _t2n(rnn_state_critic), self.algo_args["train"]["n_rollout_threads"]
+        with torch.inference_mode():
+            action_collector = []
+            action_log_prob_collector = []
+            rnn_state_collector = []
+            for agent_id in range(self.num_agents):
+                action, action_log_prob, rnn_state = self.actor[agent_id].get_actions(
+                    self.actor_buffer[agent_id].obs[step],
+                    self.actor_buffer[agent_id].rnn_states[step],
+                    self.actor_buffer[agent_id].masks[step],
+                    self.actor_buffer[agent_id].available_actions[step]
+                    if self.actor_buffer[agent_id].available_actions is not None
+                    else None,
                 )
-            )
+                action_collector.append(action)
+                action_log_prob_collector.append(action_log_prob)
+                rnn_state_collector.append(rnn_state)
+            # (n_agents, n_threads, dim) -> (n_threads, n_agents, dim)
+
+            if self.is_heter_action_space:
+                for i in range(len(action_collector)):
+                    pad_diff = self.max_action_space - action_collector[i].shape[1]
+                    if pad_diff > 0:
+                        action_collector[i] = torch.nn.functional.pad(action_collector[i], pad=(0, pad_diff), mode="constant", value=0)
+                        action_log_prob_collector[i] = torch.nn.functional.pad(action_log_prob_collector[i], pad=(0, pad_diff), mode="constant", value=0)
+            
+            actions = torch.stack(action_collector).permute(1, 0, 2).contiguous()
+            # actions = torch.tensor(action_collector).permute(1, 0, 2)
+            action_log_probs = torch.stack(action_log_prob_collector).permute(1, 0, 2).contiguous()
+            rnn_states = torch.stack(rnn_state_collector).permute(1, 0, 2, 3).contiguous()
+
+            # collect values, rnn_states_critic from 1 critic
+            if self.state_type == "EP":
+                value, rnn_state_critic = self.critic.get_values(
+                    self.critic_buffer.share_obs[step],
+                    self.critic_buffer.rnn_states_critic[step],
+                    self.critic_buffer.masks[step],
+                )
+                # (n_threads, dim)
+                values = value
+                rnn_states_critic = rnn_state_critic
+            elif self.state_type == "FP":
+                value, rnn_state_critic = self.critic.get_values(
+                    torch.concatenate(self.critic_buffer.share_obs[step]),
+                    torch.concatenate(self.critic_buffer.rnn_states_critic[step]),
+                    torch.concatenate(self.critic_buffer.masks[step]),
+                )  # concatenate (n_threads, n_agents, dim) into (n_threads * n_agents, dim)
+                # split (n_threads * n_agents, dim) into (n_threads, n_agents, dim)
+                values = torch.tensor(
+                    torch.split(value), self.algo_args["train"]["n_rollout_threads"]
+                )
+                rnn_states_critic = torch.tensor(
+                    torch.split(
+                        rnn_state_critic), self.algo_args["train"]["n_rollout_threads"]
+                    
+                )
 
         return values, actions, action_log_probs, rnn_states, rnn_states_critic
 
@@ -376,61 +423,61 @@ class OnPolicyBaseRunner:
             rnn_states_critic,  # EP: (n_threads, dim), FP: (n_threads, n_agents, dim)
         ) = data
 
-        dones_env = np.all(dones, axis=1)  # if all agents are done, then env is done
+        dones_env = torch.all(dones, axis=1)  # if all agents are done, then env is done
         rnn_states[
             dones_env == True
-        ] = np.zeros(  # if env is done, then reset rnn_state to all zero
+        ] = torch.zeros(  # if env is done, then reset rnn_state to all zero
             (
                 (dones_env == True).sum(),
                 self.num_agents,
                 self.recurrent_n,
                 self.rnn_hidden_size,
             ),
-            dtype=np.float32,
+            dtype=torch.float32, device=self.device
         )
 
         # If env is done, then reset rnn_state_critic to all zero
         if self.state_type == "EP":
-            rnn_states_critic[dones_env == True] = np.zeros(
-                ((dones_env == True).sum(), self.recurrent_n, self.rnn_hidden_size),
-                dtype=np.float32,
+            rnn_states_critic[dones_env == True] = torch.zeros(
+                ((dones_env == True).sum(), self.recurrent_n, self.rnn_hidden_size_critic),
+                dtype=torch.float32, device=self.device
             )
         elif self.state_type == "FP":
-            rnn_states_critic[dones_env == True] = np.zeros(
+            rnn_states_critic[dones_env == True] = torch.zeros(
                 (
                     (dones_env == True).sum(),
                     self.num_agents,
                     self.recurrent_n,
-                    self.rnn_hidden_size,
+                    self.rnn_hidden_size_critic,
                 ),
-                dtype=np.float32,
+                dtype=torch.float32, device=self.device
             )
 
         # masks use 0 to mask out threads that just finish.
         # this is used for denoting at which point should rnn state be reset
-        masks = np.ones(
+        masks = torch.ones(
             (self.algo_args["train"]["n_rollout_threads"], self.num_agents, 1),
-            dtype=np.float32,
+            dtype=torch.float32, device=self.device
         )
-        masks[dones_env == True] = np.zeros(
-            ((dones_env == True).sum(), self.num_agents, 1), dtype=np.float32
+        masks[dones_env == True] = torch.zeros(
+            ((dones_env == True).sum(), self.num_agents, 1), dtype=torch.float32, device=self.device
         )
 
         # active_masks use 0 to mask out agents that have died
-        active_masks = np.ones(
+        active_masks = torch.ones(
             (self.algo_args["train"]["n_rollout_threads"], self.num_agents, 1),
-            dtype=np.float32,
+            dtype=torch.float32, device=self.device
         )
-        active_masks[dones == True] = np.zeros(
-            ((dones == True).sum(), 1), dtype=np.float32
+        active_masks[dones == True] = torch.zeros(
+            ((dones == True).sum(), 1), dtype=torch.float32, device=self.device
         )
-        active_masks[dones_env == True] = np.ones(
-            ((dones_env == True).sum(), self.num_agents, 1), dtype=np.float32
+        active_masks[dones_env == True] = torch.ones(
+            ((dones_env == True).sum(), self.num_agents, 1), dtype=torch.float32, device=self.device
         )
 
         # bad_masks use 0 to denote truncation and 1 to denote termination
         if self.state_type == "EP":
-            bad_masks = np.array(
+            bad_masks = torch.tensor(
                 [
                     [0.0]
                     if "bad_transition" in info[0].keys()
@@ -440,7 +487,7 @@ class OnPolicyBaseRunner:
                 ]
             )
         elif self.state_type == "FP":
-            bad_masks = np.array(
+            bad_masks = torch.tensor(
                 [
                     [
                         [0.0]
@@ -480,29 +527,29 @@ class OnPolicyBaseRunner:
                 share_obs, rnn_states_critic, values, rewards, masks, bad_masks
             )
 
-    @torch.no_grad()
     def compute(self):
         """Compute returns and advantages.
         Compute critic evaluation of the last state,
         and then let buffer compute returns, which will be used during training.
         """
-        if self.state_type == "EP":
-            next_value, _ = self.critic.get_values(
-                self.critic_buffer.share_obs[-1],
-                self.critic_buffer.rnn_states_critic[-1],
-                self.critic_buffer.masks[-1],
-            )
-            next_value = _t2n(next_value)
-        elif self.state_type == "FP":
-            next_value, _ = self.critic.get_values(
-                np.concatenate(self.critic_buffer.share_obs[-1]),
-                np.concatenate(self.critic_buffer.rnn_states_critic[-1]),
-                np.concatenate(self.critic_buffer.masks[-1]),
-            )
-            next_value = np.array(
-                np.split(_t2n(next_value), self.algo_args["train"]["n_rollout_threads"])
-            )
-        self.critic_buffer.compute_returns(next_value, self.value_normalizer)
+        with torch.inference_mode():
+            if self.state_type == "EP":
+                next_value, _ = self.critic.get_values(
+                    self.critic_buffer.share_obs[-1],
+                    self.critic_buffer.rnn_states_critic[-1],
+                    self.critic_buffer.masks[-1],
+                )
+                next_value = next_value
+            elif self.state_type == "FP":
+                next_value, _ = self.critic.get_values(
+                    torch.concatenate(self.critic_buffer.share_obs[-1]),
+                    torch.concatenate(self.critic_buffer.rnn_states_critic[-1]),
+                    torch.concatenate(self.critic_buffer.masks[-1]),
+                )
+                next_value = torch.tensor(
+                    torch.split(next_value), self.algo_args["train"]["n_rollout_threads"]
+                )
+            self.critic_buffer.compute_returns(next_value, self.value_normalizer)
 
     def train(self):
         """Train the model."""
@@ -551,8 +598,8 @@ class OnPolicyBaseRunner:
                     else None,
                     deterministic=True,
                 )
-                eval_rnn_states[:, agent_id] = _t2n(temp_rnn_state)
-                eval_actions_collector.append(_t2n(eval_actions))
+                eval_rnn_states[:, agent_id] = temp_rnn_state.cpu().numpy()
+                eval_actions_collector.append(eval_actions.cpu().numpy())
 
             eval_actions = np.array(eval_actions_collector).transpose(1, 0, 2)
 
@@ -611,124 +658,145 @@ class OnPolicyBaseRunner:
                 )  # logger callback at the end of evaluation
                 break
 
-    @torch.no_grad()
+    
     def render(self):
         """Render the model."""
-        print("start rendering")
-        if self.manual_expand_dims:
-            # this env needs manual expansion of the num_of_parallel_envs dimension
-            for _ in range(self.algo_args["render"]["render_episodes"]):
-                eval_obs, _, eval_available_actions = self.env.reset()
-                eval_obs = np.expand_dims(np.array(eval_obs), axis=0)
-                eval_available_actions = (
-                    np.expand_dims(np.array(eval_available_actions), axis=0)
-                    if eval_available_actions is not None
-                    else None
-                )
-                eval_rnn_states = np.zeros(
-                    (
-                        self.env_num,
-                        self.num_agents,
-                        self.recurrent_n,
-                        self.rnn_hidden_size,
-                    ),
-                    dtype=np.float32,
-                )
-                eval_masks = np.ones(
-                    (self.env_num, self.num_agents, 1), dtype=np.float32
-                )
-                rewards = 0
-                while True:
-                    eval_actions_collector = []
-                    for agent_id in range(self.num_agents):
-                        eval_actions, temp_rnn_state = self.actor[agent_id].act(
-                            eval_obs[:, agent_id],
-                            eval_rnn_states[:, agent_id],
-                            eval_masks[:, agent_id],
-                            eval_available_actions[:, agent_id]
-                            if eval_available_actions is not None
-                            else None,
-                            deterministic=True,
-                        )
-                        eval_rnn_states[:, agent_id] = _t2n(temp_rnn_state)
-                        eval_actions_collector.append(_t2n(eval_actions))
-                    eval_actions = np.array(eval_actions_collector).transpose(1, 0, 2)
-                    (
-                        eval_obs,
-                        _,
-                        eval_rewards,
-                        eval_dones,
-                        _,
-                        eval_available_actions,
-                    ) = self.env.step(eval_actions[0])
-                    rewards += eval_rewards[0][0]
+        with torch.inference_mode():
+            print("start rendering")
+            if self.manual_expand_dims:
+                log_data = []
+                # this env needs manual expansion of the num_of_parallel_envs dimension
+                for epi in range(self.algo_args["render"]["render_episodes"]):
+                    eval_obs, _, eval_available_actions = self.env.reset()
                     eval_obs = np.expand_dims(np.array(eval_obs), axis=0)
+                    start_pos_x = self.env.env.sim.data.qpos[0]
+                    start_pos_y = self.env.env.sim.data.qpos[1]
+                    
+                    step_count = 0
+                    prev_pos_x = start_pos_x
+                    prev_pos_y = start_pos_y
                     eval_available_actions = (
                         np.expand_dims(np.array(eval_available_actions), axis=0)
                         if eval_available_actions is not None
                         else None
                     )
-                    if self.manual_render:
-                        self.env.render()
-                    if self.manual_delay:
-                        time.sleep(0.1)
-                    if eval_dones[0]:
-                        print(f"total reward of this episode: {rewards}")
-                        break
-        else:
-            # this env does not need manual expansion of the num_of_parallel_envs dimension
-            # such as dexhands, which instantiates a parallel env of 64 pair of hands
-            for _ in range(self.algo_args["render"]["render_episodes"]):
-                eval_obs, _, eval_available_actions = self.env.reset()
-                eval_rnn_states = np.zeros(
-                    (
-                        self.env_num,
-                        self.num_agents,
-                        self.recurrent_n,
-                        self.rnn_hidden_size,
-                    ),
-                    dtype=np.float32,
-                )
-                eval_masks = np.ones(
-                    (self.env_num, self.num_agents, 1), dtype=np.float32
-                )
-                rewards = 0
-                while True:
-                    eval_actions_collector = []
-                    for agent_id in range(self.num_agents):
-                        eval_actions, temp_rnn_state = self.actor[agent_id].act(
-                            eval_obs[:, agent_id],
-                            eval_rnn_states[:, agent_id],
-                            eval_masks[:, agent_id],
-                            eval_available_actions[:, agent_id]
-                            if eval_available_actions[0] is not None
-                            else None,
-                            deterministic=True,
+                    eval_rnn_states = np.zeros(
+                        (
+                            self.env_num,
+                            self.num_agents,
+                            self.recurrent_n,
+                            self.rnn_hidden_size,
+                        ),
+                        dtype=np.float32,
+                    )
+                    eval_masks = np.ones(
+                        (self.env_num, self.num_agents, 1), dtype=np.float32
+                    )
+                    rewards = 0
+                    while step_count < 200:
+                        eval_actions_collector = []
+                        for agent_id in range(self.num_agents):
+                            eval_actions, temp_rnn_state = self.actor[agent_id].act(
+                                eval_obs[:, agent_id],
+                                eval_rnn_states[:, agent_id],
+                                eval_masks[:, agent_id],
+                                eval_available_actions[:, agent_id]
+                                if eval_available_actions is not None
+                                else None,
+                                deterministic=True,
+                            )
+                            eval_rnn_states[:, agent_id] = temp_rnn_state.cpu().numpy()
+                            eval_actions_collector.append(eval_actions.cpu().numpy())
+                        eval_actions = np.array(eval_actions_collector).transpose(1, 0, 2)
+                        (
+                            eval_obs,
+                            _,
+                            eval_rewards,
+                            eval_dones,
+                            _,
+                            eval_available_actions,
+                        ) = self.env.step(eval_actions[0])
+                        curr_pos_x = self.env.env.sim.data.qpos[0]
+                        curr_pos_y = self.env.env.sim.data.qpos[1]
+                        distance = np.sqrt((curr_pos_x - prev_pos_x) ** 2 + (curr_pos_y - prev_pos_y) ** 2)
+                        log_data.append([epi,step_count, step_count * self.env.env.dt, curr_pos_x, curr_pos_y, distance])
+                        prev_pos_x = curr_pos_x
+                        prev_pos_y = curr_pos_y
+                        step_count += 1
+                        rewards += eval_rewards[0][0]
+                        eval_obs = np.expand_dims(np.array(eval_obs), axis=0)
+                        eval_available_actions = (
+                            np.expand_dims(np.array(eval_available_actions), axis=0)
+                            if eval_available_actions is not None
+                            else None
                         )
-                        eval_rnn_states[:, agent_id] = _t2n(temp_rnn_state)
-                        eval_actions_collector.append(_t2n(eval_actions))
-                    eval_actions = np.array(eval_actions_collector).transpose(1, 0, 2)
-                    (
-                        eval_obs,
-                        _,
-                        eval_rewards,
-                        eval_dones,
-                        _,
-                        eval_available_actions,
-                    ) = self.env.step(eval_actions)
-                    rewards += eval_rewards[0][0][0]
-                    if self.manual_render:
-                        self.env.render()
-                    if self.manual_delay:
-                        time.sleep(0.1)
-                    if eval_dones[0][0]:
-                        print(f"total reward of this episode: {rewards}")
-                        break
-        if "smac" in self.args["env"]:  # replay for smac, no rendering
-            if "v2" in self.args["env"]:
-                self.env.env.save_replay()
+                        if self.manual_render:
+                            self.env.render()
+                        if self.manual_delay:
+                            time.sleep(0.1)
+                        if eval_dones[0]:
+                            print(f"total reward of this episode: {rewards}")
+                            break
+                    import csv
+                with open(self.algo_args["train"]["model_dir"]+"/render_distance_log_seed.csv", "w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["ep","step", "time", "x_pos", "y_pos", "distance"])
+                    writer.writerows(log_data)
+                print("Saved stepwise position log to render_distance_log.csv")
             else:
-                self.env.save_replay()
+                # this env does not need manual expansion of the num_of_parallel_envs dimension
+                # such as dexhands, which instantiates a parallel env of 64 pair of hands
+                for _ in range(self.algo_args["render"]["render_episodes"]):
+                    eval_obs, _, eval_available_actions = self.env.reset()
+                    eval_rnn_states = torch.zeros(
+                        (
+                            self.env_num,
+                            self.num_agents,
+                            self.recurrent_n,
+                            self.rnn_hidden_size,
+                        ),
+                        dtype=torch.float32,
+                    )
+                    eval_masks = torch.ones(
+                        (self.env_num, self.num_agents, 1), dtype=torch.float32, device=self.device
+                    )
+                    rewards = 0
+                    while True:
+                        eval_actions_collector = []
+                        for agent_id in range(self.num_agents):
+                            eval_actions, temp_rnn_state = self.actor[agent_id].act(
+                                eval_obs[:, agent_id],
+                                eval_rnn_states[:, agent_id],
+                                eval_masks[:, agent_id],
+                                eval_available_actions[:, agent_id]
+                                if eval_available_actions[0] is not None
+                                else None,
+                                deterministic=True,
+                            )
+                            eval_rnn_states[:, agent_id] = temp_rnn_state
+                            eval_actions_collector.append(eval_actions)
+                        eval_actions = torch.tensor(eval_actions_collector).permute(1, 0, 2).contiguous()
+                        (
+                            eval_obs,
+                            _,
+                            eval_rewards,
+                            eval_dones,
+                            _,
+                            eval_available_actions,
+                        ) = self.env.step(eval_actions)
+                        rewards += eval_rewards[0][0][0]
+                        if self.manual_render:
+                            self.env.render()
+                        if self.manual_delay:
+                            time.sleep(0.1)
+                        if eval_dones[0][0]:
+                            print(f"total reward of this episode: {rewards}")
+                            break
+            if "smac" in self.args["env"]:  # replay for smac, no rendering
+                if "v2" in self.args["env"]:
+                    self.env.env.save_replay()
+                else:
+                    self.env.save_replay()
 
     def prep_rollout(self):
         """Prepare for rollout."""

@@ -6,6 +6,7 @@ import numpy as np
 
 from .multiagentenv import MultiAgentEnv
 from .manyagent_swimmer import ManyAgentSwimmerEnv
+from .isaaclab_ant import IsaacLabAntEnv
 from .obsk import get_joints_at_kdist, get_parts_and_edges, build_obs
 
 
@@ -16,6 +17,7 @@ def env_fn(env, **kwargs) -> MultiAgentEnv:  # TODO: this may be a more complex 
 
 env_REGISTRY = {}
 env_REGISTRY["manyagent_swimmer"] = partial(env_fn, env=ManyAgentSwimmerEnv)
+env_REGISTRY["isaac_factor_ant-v2"] = partial(env_fn, env=IsaacLabAntEnv)
 
 
 # using code from https://github.com/ikostrikov/pytorch-ddpg-naf
@@ -41,7 +43,7 @@ class MujocoMulti(MultiAgentEnv):
         super().__init__(batch_size, **kwargs)
         self.scenario = kwargs["env_args"]["scenario"]  # e.g. Ant-v2
         self.agent_conf = kwargs["env_args"]["agent_conf"]  # e.g. '2x3'
-
+        self.log_info = {}
         (
             self.agent_partitions,
             self.mujoco_edges,
@@ -62,7 +64,7 @@ class MujocoMulti(MultiAgentEnv):
         if self.agent_obsk is not None:
             self.k_categories_label = kwargs["env_args"].get("k_categories")
             if self.k_categories_label is None:
-                if self.scenario in ["Ant-v2", "manyagent_ant"]:
+                if self.scenario in ["Ant-v2", "manyagent_ant", "isaac_factor_ant-v2"]:
                     self.k_categories_label = "qpos,qvel,cfrc_ext|qpos"
                 elif self.scenario in ["Humanoid-v2", "HumanoidStandup-v2"]:
                     self.k_categories_label = (
@@ -121,7 +123,7 @@ class MujocoMulti(MultiAgentEnv):
         self.env = self.timelimit_env.env
         self.timelimit_env.reset()
         self.obs_size = self.get_obs_size()
-        self.share_obs_size = self.get_state_size()
+        self.share_obs_size = self.get_state_size()*self.n_agents
 
         # COMPATIBILITY
         self.n = self.n_agents
@@ -135,15 +137,15 @@ class MujocoMulti(MultiAgentEnv):
         ]
 
         acdims = [len(ap) for ap in self.agent_partitions]
-        self.action_space = tuple(
-            [
+        self.action_space = {a:
+
                 Box(
                     self.env.action_space.low[sum(acdims[:0]) : sum(acdims[: 1])],
                     self.env.action_space.high[sum(acdims[:0]) : sum(acdims[: 1])],
                 )
                 for a in range(self.n_agents)
-            ]
-        )
+
+        }
         self.true_action_space = tuple(
             [
                 Box(
@@ -187,9 +189,10 @@ class MujocoMulti(MultiAgentEnv):
         rewards = [[reward_n]] * self.n_agents
         dones = [done_n] * self.n_agents
         infos = [info for _ in range(self.n_agents)]
+        self.log_info = info
         return (
             self.get_obs(),
-            self.get_state(),
+            np.concatenate([self.get_state() for _ in range(self.n_agents)], axis=1),
             rewards,
             dones,
             infos,
@@ -206,9 +209,9 @@ class MujocoMulti(MultiAgentEnv):
             # obs_n.append(self.get_obs_agent(a))
             # obs_n.append(np.concatenate([state, self.get_obs_agent(a), agent_id_feats]))
             # obs_n.append(np.concatenate([self.get_obs_agent(a), agent_id_feats]))
-            obs_i = np.concatenate([state, agent_id_feats])
-            obs_i = (obs_i - np.mean(obs_i)) / np.std(obs_i)
-            obs_n.append(obs_i)
+            # obs_i = np.concatenate([state, agent_id_feats])
+            # obs_i = (obs_i - np.mean(obs_i)) / np.std(obs_i)
+            obs_n.append(state)
         return obs_n
 
     def get_obs_agent(self, agent_id):
@@ -277,7 +280,7 @@ class MujocoMulti(MultiAgentEnv):
         """Returns initial observations and states"""
         self.steps = 0
         self.timelimit_env.reset()
-        return self.get_obs(), self.get_state(), self.get_avail_actions()
+        return self.get_obs(), np.concatenate([self.get_state() for _ in range(self.n_agents)], axis=1), self.get_avail_actions()
 
     def render(self, **kwargs):
         self.env.render(**kwargs)

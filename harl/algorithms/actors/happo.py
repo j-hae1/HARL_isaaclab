@@ -3,9 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from harl.utils.envs_tools import check
-from harl.utils.models_tools import get_grad_norm
+from harl.utils.models_tools import get_grad_norm, torch_nanstd
 from harl.algorithms.actors.on_policy_base import OnPolicyBase
-
 
 class HAPPO(OnPolicyBase):
     def __init__(self, args, obs_space, act_space, device=torch.device("cpu")):
@@ -116,14 +115,14 @@ class HAPPO(OnPolicyBase):
         train_info["actor_grad_norm"] = 0
         train_info["ratio"] = 0
 
-        if np.all(actor_buffer.active_masks[:-1] == 0.0):
+        if torch.all(actor_buffer.active_masks[:-1] == 0.0):
             return train_info
 
         if state_type == "EP":
-            advantages_copy = advantages.copy()
-            advantages_copy[actor_buffer.active_masks[:-1] == 0.0] = np.nan
-            mean_advantages = np.nanmean(advantages_copy)
-            std_advantages = np.nanstd(advantages_copy)
+            advantages_copy = advantages.clone()
+            advantages_copy[actor_buffer.active_masks[:-1] == 0.0] = torch.nan
+            mean_advantages = torch.nanmean(advantages_copy)
+            std_advantages = torch_nanstd(advantages_copy)
             advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
 
         for _ in range(self.ppo_epoch):

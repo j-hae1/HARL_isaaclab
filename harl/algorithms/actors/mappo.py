@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from harl.utils.envs_tools import check
 from harl.utils.models_tools import get_grad_norm
+from harl.utils.models_tools import torch_nanstd
 from harl.algorithms.actors.on_policy_base import OnPolicyBase
 
 
@@ -96,7 +97,7 @@ class MAPPO(OnPolicyBase):
         """Perform a training update for non-parameter-sharing MAPPO using minibatch GD.
         Args:
             actor_buffer: (OnPolicyActorBuffer) buffer containing training data related to actor.
-            advantages: (np.ndarray) advantages.
+            advantages: (torch.ndarray) advantages.
             state_type: (str) type of state.
         Returns:
             train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
@@ -107,14 +108,14 @@ class MAPPO(OnPolicyBase):
         train_info["actor_grad_norm"] = 0
         train_info["ratio"] = 0
 
-        if np.all(actor_buffer.active_masks[:-1] == 0.0):
+        if torch.all(actor_buffer.active_masks[:-1] == 0.0):
             return train_info
 
         if state_type == "EP":
-            advantages_copy = advantages.copy()
-            advantages_copy[actor_buffer.active_masks[:-1] == 0.0] = np.nan
-            mean_advantages = np.nanmean(advantages_copy)
-            std_advantages = np.nanstd(advantages_copy)
+            advantages_copy = advantages.clone()
+            advantages_copy[actor_buffer.active_masks[:-1] == 0.0] = torch.nan
+            mean_advantages = torch.nanmean(advantages_copy)
+            std_advantages = torch_nanstd(advantages_copy)
             advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
 
         for _ in range(self.ppo_epoch):
@@ -150,7 +151,7 @@ class MAPPO(OnPolicyBase):
         """Perform a training update for parameter-sharing MAPPO using minibatch GD.
         Args:
             actor_buffer: (list[OnPolicyActorBuffer]) buffer containing training data related to actor.
-            advantages: (np.ndarray) advantages.
+            advantages: (torch.ndarray) advantages.
             num_agents: (int) number of agents.
             state_type: (str) type of state.
         Returns:
@@ -166,15 +167,15 @@ class MAPPO(OnPolicyBase):
             advantages_ori_list = []
             advantages_copy_list = []
             for agent_id in range(num_agents):
-                advantages_ori = advantages.copy()
+                advantages_ori = advantages.clone()
                 advantages_ori_list.append(advantages_ori)
-                advantages_copy = advantages.copy()
-                advantages_copy[actor_buffer[agent_id].active_masks[:-1] == 0.0] = np.nan
+                advantages_copy = advantages.clone()
+                advantages_copy[actor_buffer[agent_id].active_masks[:-1] == 0.0] = torch.nan
                 advantages_copy_list.append(advantages_copy)
-            advantages_ori_tensor = np.array(advantages_ori_list)
-            advantages_copy_tensor = np.array(advantages_copy_list)
-            mean_advantages = np.nanmean(advantages_copy_tensor)
-            std_advantages = np.nanstd(advantages_copy_tensor)
+            advantages_ori_tensor = torch.stack(advantages_ori_list)
+            advantages_copy_tensor = torch.stack(advantages_copy_list)
+            mean_advantages = torch.nanmean(advantages_copy_tensor)
+            std_advantages = torch_nanstd(advantages_copy_tensor)
             normalized_advantages = (advantages_ori_tensor - mean_advantages) / (
                 std_advantages + 1e-5
             )
@@ -212,11 +213,11 @@ class MAPPO(OnPolicyBase):
                     for i in range(8):
                         batches[i].append(sample[i])
                 for i in range(7):
-                    batches[i] = np.concatenate(batches[i], axis=0)
+                    batches[i] = torch.concatenate(batches[i], axis=0)
                 if batches[7][0] is None:
                     batches[7] = None
                 else:
-                    batches[7] = np.concatenate(batches[7], axis=0)
+                    batches[7] = torch.concatenate(batches[7], axis=0)
                 policy_loss, dist_entropy, actor_grad_norm, imp_weights = self.update(
                     tuple(batches)
                 )
