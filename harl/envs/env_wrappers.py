@@ -421,7 +421,7 @@ class IsaacLabWrapper(object):
         :param env: The multi-agent environment to wrap
         :type env: Any supported multi-agent environment
         """
-        if not hasattr(env, "agents"):
+        if not hasattr(env.unwrapped, "agents"):
             self._env = SingleAgentIsaacLabWrapper(env)
             self.unwrapped = self._env
         else:
