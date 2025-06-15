@@ -182,7 +182,7 @@ class OnPolicyBaseRunner:
                 self.value_normalizer = ValueNorm(1, device=self.device)
             else:
                 self.value_normalizer = None
-            breakpoint()
+
             self.logger = LOGGER_REGISTRY[args["env"]](
                 args, algo_args, env_args, self.num_agents, self.writter, self.run_dir
             )
