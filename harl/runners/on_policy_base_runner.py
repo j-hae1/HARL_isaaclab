@@ -60,6 +60,7 @@ class OnPolicyBaseRunner:
                 env_args,
                 args["algo"],
                 algo_args["seed"]["seed"],
+                hms_time=algo_args["logger"]["experiment"]["hms_time"],
                 wandb_kwargs=wandb_kwargs,
                 logger_path=algo_args["logger"]["experiment"]["directory"],
                 use_wandb= algo_args["logger"]["use_wandb"],

@@ -103,10 +103,9 @@ def get_task_name(env, env_args):
     return task
 
 # TODO: Changed
-def init_dir(env, env_args, algo, seed, logger_path, wandb_kwargs, use_wandb=True):
+def init_dir(env, env_args, algo, seed, logger_path, hms_time, wandb_kwargs, use_wandb=True):
     """Init directory for saving results."""
     task = get_task_name(env, env_args)
-    hms_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
     experiment_name = f"{hms_time}_{algo}"
     log_root_path = os.path.join("logs", "harl", logger_path)
     log_root_path = os.path.abspath(log_root_path)
