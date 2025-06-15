@@ -1,6 +1,7 @@
 """Base runner for on-policy algorithms."""
 
 import time
+import copy
 import numpy as np
 import torch
 import setproctitle
@@ -45,14 +46,23 @@ class OnPolicyBaseRunner:
         self.fixed_order = algo_args["algo"]["fixed_order"]
         set_seed(algo_args["seed"])
         self.device = init_device(algo_args["device"])
+        
+        # set the wandb kwargs
+        wandb_config = {**self.args, **self.algo_args, **self.env_args}
+
+        wandb_kwargs = copy.deepcopy(algo_args["logger"]["wandb_kwargs"])
+        wandb_kwargs.setdefault("sync_tensorboard", True)
+        wandb_kwargs.setdefault("config", {})
+        wandb_kwargs["config"].update(wandb_config)        
         if not self.algo_args["render"]["use_render"]:  # train, not render
             self.run_dir, self.log_dir, self.save_dir, self.writter = init_dir(
                 args["env"],
                 env_args,
                 args["algo"],
-                args["exp_name"],
                 algo_args["seed"]["seed"],
-                logger_path=algo_args["logger"]["log_dir"],
+                wandb_kwargs=wandb_kwargs,
+                logger_path=algo_args["logger"]["experiment"]["directory"],
+                use_wandb= algo_args["logger"]["use_wandb"],
             )
             save_config(args, algo_args, env_args, self.run_dir)
         # set the title of the process
@@ -172,7 +182,7 @@ class OnPolicyBaseRunner:
                 self.value_normalizer = ValueNorm(1, device=self.device)
             else:
                 self.value_normalizer = None
-            
+            breakpoint()
             self.logger = LOGGER_REGISTRY[args["env"]](
                 args, algo_args, env_args, self.num_agents, self.writter, self.run_dir
             )

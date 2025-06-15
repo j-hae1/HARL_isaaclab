@@ -4,7 +4,39 @@ import os
 import json
 import yaml
 from uu import Error
+import wandb
 
+
+# TODO: CHANGED
+class CompatibleLogger:
+    def __init__(self, use_wandb, log_path):
+        self.use_wandb = use_wandb
+
+        if not use_wandb:
+            from tensorboardX import SummaryWriter
+            self.writer = SummaryWriter(log_path)
+        else:
+            self.writer = None  # wandb handles its own logging separately
+
+    def add_scalar(self, key, value, step):
+        if self.use_wandb:
+            import wandb
+            wandb.log({key: value}, step=step)
+        else:
+            self.writer.add_scalar(key, value, step)
+
+    def add_scalars(self, main_tag, tag_scalar_dict, step):
+        if self.use_wandb:
+            import wandb
+            # Flatten under main_tag prefix
+            wandb.log({f"{main_tag}/{k}": v for k, v in tag_scalar_dict.items()}, step=step)
+        else:
+            self.writer.add_scalars(main_tag, tag_scalar_dict, step)
+
+    def close(self):
+        if not self.use_wandb and self.writer is not None:
+            self.writer.export_scalars_to_json(os.path.join(self.writer.log_dir, "summary.json"))
+            self.writer.close()
 
 def get_defaults_yaml_args(algo, env):
     """Load config file for user-specified algo and env.
@@ -70,26 +102,26 @@ def get_task_name(env, env_args):
         task = env_args["task"]
     return task
 
-
-def init_dir(env, env_args, algo, exp_name, seed, logger_path):
+# TODO: Changed
+def init_dir(env, env_args, algo, seed, logger_path, wandb_kwargs, use_wandb=True):
     """Init directory for saving results."""
     task = get_task_name(env, env_args)
-    hms_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
-    results_path = os.path.join(
-        logger_path,
-        env,
-        task,
-        algo,
-        exp_name,
-        "-".join(["seed-{:0>5}".format(seed), hms_time]),
-    )
+    hms_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+    experiment_name = f"{hms_time}_{algo}"
+    log_root_path = os.path.join("logs", "harl", logger_path)
+    log_root_path = os.path.abspath(log_root_path)
+    
+    results_path = os.path.join(log_root_path, experiment_name)
     log_path = os.path.join(results_path, "logs")
     os.makedirs(log_path, exist_ok=True)
-    from tensorboardX import SummaryWriter
-
-    writter = SummaryWriter(log_path)
-    models_path = os.path.join(results_path, "models")
+    models_path = os.path.join(results_path, "checkpoints")
     os.makedirs(models_path, exist_ok=True)
+
+    if use_wandb:
+        wandb_kwargs.setdefault("name", experiment_name)
+        wandb.init(**wandb_kwargs)
+    
+    writter = CompatibleLogger(use_wandb=use_wandb, log_path=log_path)
     return results_path, log_path, models_path, writter
 
 
